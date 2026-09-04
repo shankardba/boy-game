@@ -677,10 +677,78 @@
   });
 
   // ----------------------------------------------------------------------
+  // Defeat explosions — chunky debris + an expanding flash ring, purely
+  // additive visual state updated each frame and discarded once expired.
+  // ----------------------------------------------------------------------
+  var effects = [];
+  var DEBRIS_GEO = new THREE.IcosahedronGeometry(0.09, 0);
+  var GRAVITY = 9;
+
+  function spawnExplosion(pos, color) {
+    var group = new THREE.Group();
+    group.position.copy(pos);
+    group.position.y += 0.34;
+    worldGroup.add(group);
+
+    var debrisMat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.5, transparent: true, opacity: 1 });
+    var pieces = [];
+    var count = 10;
+    for (var i = 0; i < count; i++) {
+      var piece = new THREE.Mesh(DEBRIS_GEO, debrisMat);
+      piece.scale.setScalar(rand(0.55, 1.3));
+      var angle = (i / count) * Math.PI * 2 + rand(-0.3, 0.3);
+      var speed = rand(1.6, 3.4);
+      piece.userData.vel = new THREE.Vector3(Math.cos(angle) * speed, rand(2.0, 3.6), Math.sin(angle) * speed);
+      piece.userData.spin = new THREE.Vector3(rand(-7, 7), rand(-7, 7), rand(-7, 7));
+      group.add(piece);
+      pieces.push(piece);
+    }
+
+    var flashMat = new THREE.MeshBasicMaterial({ color: 0xfff3d6, transparent: true, opacity: 0.85 });
+    var flash = new THREE.Mesh(new THREE.SphereGeometry(0.3, 10, 8), flashMat);
+    group.add(flash);
+
+    effects.push({ group: group, debrisMat: debrisMat, pieces: pieces, flash: flash, flashMat: flashMat, age: 0, life: 0.7 });
+  }
+
+  function updateEffects(dt) {
+    for (var i = effects.length - 1; i >= 0; i--) {
+      var fx = effects[i];
+      fx.age += dt;
+      var t = fx.age / fx.life;
+      if (t >= 1) {
+        worldGroup.remove(fx.group);
+        effects.splice(i, 1);
+        continue;
+      }
+      fx.pieces.forEach(function (p) {
+        p.userData.vel.y -= GRAVITY * dt;
+        p.position.addScaledVector(p.userData.vel, dt);
+        p.rotation.x += p.userData.spin.x * dt;
+        p.rotation.y += p.userData.spin.y * dt;
+        p.rotation.z += p.userData.spin.z * dt;
+      });
+      fx.debrisMat.opacity = 1 - t;
+      var flashT = Math.min(1, t / 0.3);
+      fx.flash.scale.setScalar(0.3 + flashT * 2.2);
+      fx.flashMat.opacity = (1 - flashT) * 0.85;
+    }
+  }
+
+  // ----------------------------------------------------------------------
   // Player state
   // ----------------------------------------------------------------------
   var DIR_VEC = { up: { dx: 0, dz: -1 }, down: { dx: 0, dz: 1 }, left: { dx: -1, dz: 0 }, right: { dx: 1, dz: 0 } };
   var DIR_ROT = { down: 0, up: Math.PI, right: Math.PI / 2, left: -Math.PI / 2 };
+
+  // The player's facing direction is remembered independent of movement —
+  // set the instant a direction is pressed, not deferred to the next move
+  // tick, so even a very quick tap (or a tap+release inside one frame)
+  // still turns the character and is remembered for a direction-less attack.
+  function setFacing(dir) {
+    player.facing = dir;
+    player.obj.rotation.y = DIR_ROT[dir];
+  }
 
   var player = {
     obj: createPlayer(),
@@ -771,7 +839,7 @@
   }
   function sfxPickup() { tone(660, 0, 0.12, 'triangle'); tone(880, 0.07, 0.14, 'triangle'); tone(1180, 0.14, 0.2, 'triangle'); }
   function sfxHit() { tone(180, 0, 0.18, 'sawtooth', 0.22); tone(110, 0.05, 0.22, 'sawtooth', 0.18); }
-  function sfxDefeat() { tone(500, 0, 0.08, 'square', 0.15); tone(260, 0.05, 0.12, 'square', 0.12); }
+  function sfxDefeat() { tone(500, 0, 0.08, 'square', 0.15); tone(260, 0.05, 0.12, 'square', 0.12); sweep(240, 50, 0, 0.22, 'sawtooth', 0.16); }
   function sfxWin() { [523, 659, 784, 1046].forEach(function (f, i) { tone(f, i * 0.12, 0.28, 'triangle'); }); }
   function sfxBump() { tone(140, 0, 0.06, 'square', 0.08); }
   function sfxSwing() { sweep(900, 260, 0, 0.14, 'sawtooth', 0.1); }
@@ -840,7 +908,7 @@
 
   window.addEventListener('keydown', function (e) {
     var dir = dirFromEvent(e);
-    if (dir) { pushDir(dir); e.preventDefault(); }
+    if (dir) { pushDir(dir); setFacing(dir); e.preventDefault(); }
     else if (isActionKey(e)) { handleAction(); e.preventDefault(); }
   });
   window.addEventListener('keyup', function (e) {
@@ -850,7 +918,7 @@
 
   document.querySelectorAll('#dpad button').forEach(function (btn) {
     var dir = btn.getAttribute('data-dir');
-    btn.addEventListener('pointerdown', function (e) { e.preventDefault(); pushDir(dir); });
+    btn.addEventListener('pointerdown', function (e) { e.preventDefault(); pushDir(dir); setFacing(dir); });
     btn.addEventListener('pointerup', function () { releaseDir(dir); });
     btn.addEventListener('pointerleave', function () { releaseDir(dir); });
   });
@@ -879,8 +947,7 @@
     // left even if the player hasn't finished turning to face that way yet);
     // fall back to the last direction faced if no direction key is held.
     var dir = pressedDirs.length ? pressedDirs[pressedDirs.length - 1] : player.facing;
-    player.facing = dir;
-    player.obj.rotation.y = DIR_ROT[dir];
+    setFacing(dir);
     player.attackCooldown = ATTACK_COOLDOWN;
     player.attackAnim = ATTACK_DURATION;
     sfxSwing();
@@ -898,6 +965,7 @@
     en.alive = false;
     en.obj.visible = false;
     en.respawnTimer = 6;
+    spawnExplosion(en.obj.position, 0x8f5fd6);
     sfxDefeat();
   }
 
@@ -917,8 +985,7 @@
   function inBounds(tx, ty) { return tx >= 0 && ty >= 0 && tx < W && ty < H; }
 
   function attemptMove(dir) {
-    player.facing = dir;
-    player.obj.rotation.y = DIR_ROT[dir];
+    setFacing(dir);
     if (player.isMoving) return;
     var vec = DIR_VEC[dir];
     var ntx = player.tileX + vec.dx, nty = player.tileY + vec.dz;
@@ -1056,6 +1123,8 @@
           }
         }
       });
+
+      updateEffects(dt);
 
       waterTiles.forEach(function (wt) {
         wt.mesh.position.y = wt.baseY + Math.sin(t * 1.6 + wt.phase) * 0.03;
