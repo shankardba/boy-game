@@ -125,6 +125,41 @@
   }
   @keyframes blink { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
 
+  #car-menu {
+    display: none;
+    left: 50%; bottom: 8%;
+    transform: translateX(-50%);
+    width: min(88vw, 420px);
+    background: rgba(8,6,10,0.92);
+    border: 1px solid rgba(240,168,60,0.55);
+    border-radius: 14px;
+    padding: 18px 22px 14px;
+    color: #f7ece9;
+    box-shadow: 0 14px 40px rgba(0,0,0,0.5);
+  }
+  #car-menu.open { display: block; }
+  .car-menu-title {
+    font-family: 'Cinzel', serif;
+    font-weight: 700;
+    color: #ffd27a;
+    font-size: 1rem;
+    margin-bottom: 12px;
+  }
+  #car-menu-list { display: flex; flex-direction: column; gap: 8px; }
+  #car-menu-list button {
+    text-align: left;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(240,168,60,0.3);
+    background: rgba(240,168,60,0.06);
+    color: #f7ece9;
+    font-family: 'Inter', sans-serif;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+  #car-menu-list button:hover { border-color: #ffd27a; background: rgba(240,168,60,0.14); }
+
   #tools-btn {
     top: 16px; left: 50%; transform: translateX(-50%);
     width: 40px; height: 40px;
@@ -297,6 +332,11 @@
     <div class="prompt">&#9660; space to close</div>
   </div>
   <div id="toast" class="hud"></div>
+  <div id="car-menu" class="hud">
+    <div class="car-menu-title">Drive to&hellip;</div>
+    <div id="car-menu-list"></div>
+    <div class="prompt">&#9660; space to close</div>
+  </div>
   <div id="shankfiddle-credit">Boy — a shankFiddle production</div>
 
   <div class="touch-controls" id="dpad">
@@ -347,6 +387,12 @@
   //              for several distinct exits.
   //           any other letter used as a key in this level's `npcs` — a
   //              named character. See `npcs` below.
+  //           C  the car — one per game, wherever it's placed. Once earned
+  //              (see CAR_REPUTATION_THRESHOLD), interacting with it from
+  //              anywhere opens a menu to drive straight to any other
+  //              level, no matter how far or disconnected — this is how a
+  //              new level avoids needing a portal wired into an existing
+  //              map at all: it only needs to exist in LEVELS.
   //
   // signs:  array of dialogue strings, matched to 'S' tiles in scan order.
   // exits:  { '<digit>': { to: '<level id>', x: <tx>, y: <ty> } } — arrival
@@ -427,7 +473,7 @@
         "#....=========....#",
         "1.,......@.......$2",
         "#...~~~.....o,,.o.#",
-        "#..~~~~~..F.K.....#",
+        "#..~~~~~..F.K...C.#",
         "#...~~~.......b...#",
         "#.$.........o...$.#",
         "#..$.,,.......,S..#",
@@ -604,7 +650,10 @@
   // money / reputation: earned from jobs (see npcs.<letter>.job below) —
   // reputation is general community standing, distinct from the
   // per-teacher respect a challenge tracks.
-  var story = { chapter: 'childhood', respect: {}, learned: {}, money: 0, reputation: 0 };
+  // hasCar: earned at the village's car once reputation clears
+  // CAR_REPUTATION_THRESHOLD — see findNearbyCar()/handleAction().
+  var story = { chapter: 'childhood', respect: {}, learned: {}, money: 0, reputation: 0, hasCar: false };
+  var CAR_REPUTATION_THRESHOLD = 5;
 
   // absentFrom marks a character gone starting at that chapter and for
   // every chapter after it (not just that one) — once someone is gone from
@@ -646,7 +695,7 @@
     var exits = levelDef.exits || {};
     var npcs = levelDef.npcs || {};
     var obstacles = new Set();
-    var features = { trees: [], rocks: [], bushes: [], flowers: [], shards: [], signs: [], houseTiles: [], portals: [], npcs: [] };
+    var features = { trees: [], rocks: [], bushes: [], flowers: [], shards: [], signs: [], houseTiles: [], portals: [], npcs: [], car: null };
     var groundKinds = [];
     var playerStart = { x: 1, y: 1 };
 
@@ -674,6 +723,7 @@
           case 'S': obstacles.add(key(x, y)); features.signs.push({ x: x, y: y, message: (levelDef.signs || [])[features.signs.length] || 'A weathered sign, worn smooth by rain.' }); break;
           case ',': features.flowers.push({ x: x, y: y }); break;
           case '$': features.shards.push({ x: x, y: y, collected: false }); break;
+          case 'C': obstacles.add(key(x, y)); features.car = { x: x, y: y }; break;
           case '@': playerStart = { x: x, y: y }; break;
         }
       }
@@ -914,6 +964,45 @@
     return g;
   }
 
+  function createCar() {
+    var g = new THREE.Group();
+    var bodyMat = new THREE.MeshStandardMaterial({ color: 0xd6432f, roughness: 0.4, metalness: 0.3 });
+
+    var body = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.32, 0.55), bodyMat);
+    body.position.y = 0.34;
+    body.castShadow = true;
+    g.add(body);
+
+    var cabin = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.28, 0.48), bodyMat);
+    cabin.position.set(-0.05, 0.62, 0);
+    cabin.castShadow = true;
+    g.add(cabin);
+
+    var glassMat = new THREE.MeshStandardMaterial({ color: 0x9fd8e8, emissive: 0x1a3038, emissiveIntensity: 0.3, roughness: 0.2 });
+    var windshield = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.22, 0.42), glassMat);
+    windshield.position.set(0.22, 0.62, 0);
+    g.add(windshield);
+
+    var wheelMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.8 });
+    var wheelGeo = new THREE.CylinderGeometry(0.14, 0.14, 0.1, 12);
+    [[-0.32, 0.3], [-0.32, -0.3], [0.32, 0.3], [0.32, -0.3]].forEach(function (pos) {
+      var wheel = new THREE.Mesh(wheelGeo, wheelMat);
+      wheel.rotation.z = Math.PI / 2;
+      wheel.position.set(pos[0], 0.14, pos[1]);
+      wheel.castShadow = true;
+      g.add(wheel);
+    });
+
+    var lightMat = new THREE.MeshStandardMaterial({ color: 0xfff3c0, emissive: 0xffcf6b, emissiveIntensity: 0.8 });
+    [0.24, -0.24].forEach(function (z) {
+      var headlight = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.08, 0.1), lightMat);
+      headlight.position.set(0.5, 0.34, z);
+      g.add(headlight);
+    });
+
+    return g;
+  }
+
   // Generic adult NPC — same low-poly-diorama vocabulary as the player,
   // but taller proportions and customizable clothing/hair so Mom, Dad, and
   // every future townsperson can share one builder.
@@ -1077,6 +1166,14 @@
       n.obj = obj;
     });
 
+    if (w.features.car) {
+      var carPos = worldPos(w, w.features.car.x, w.features.car.y);
+      var carObj = createCar();
+      carObj.position.set(carPos.x, 0, carPos.z);
+      group.add(carObj);
+      w.features.car.obj = carObj;
+    }
+
     return { group: group, waterTiles: waterTiles };
   }
 
@@ -1177,6 +1274,7 @@
     renderShardCount();
     dialogueOpen = false;
     closeDialogue();
+    closeCarMenu();
 
     // Snap instantly rather than lerping — panning across the old map on
     // the way to the new one would look broken.
@@ -1343,6 +1441,39 @@
     return null;
   }
 
+  function findNearbyCar() {
+    var car = world.features.car;
+    if (!car) return null;
+    var dx = Math.abs(car.x - player.tileX), dy = Math.abs(car.y - player.tileY);
+    return dx + dy <= 1 ? car : null;
+  }
+
+  // The car is the fast-travel mechanism: once earned, it can reach any
+  // level in LEVELS directly — a new level needs no portal wired into an
+  // existing map to be reachable, just an entry in LEVELS.
+  var carMenuOpen = false;
+  var carMenuEl = document.getElementById('car-menu');
+  var carMenuListEl = document.getElementById('car-menu-list');
+  function openCarMenu() {
+    carMenuListEl.innerHTML = '';
+    LEVELS.forEach(function (lvl, i) {
+      if (lvl.id === world.id) return;
+      var btn = document.createElement('button');
+      btn.textContent = lvl.name;
+      btn.addEventListener('click', function () {
+        closeCarMenu();
+        loadLevel(i);
+      });
+      carMenuListEl.appendChild(btn);
+    });
+    carMenuEl.classList.add('open');
+    carMenuOpen = true;
+  }
+  function closeCarMenu() {
+    carMenuEl.classList.remove('open');
+    carMenuOpen = false;
+  }
+
   // NPCs with a `challenge` turn talking into a repeatable respect grind
   // instead of a static line: each conversation nudges story.respect[key]
   // up by one (with a line reacting to where you're at) until it reaches
@@ -1392,7 +1523,22 @@
 
   function handleAction() {
     ensureAudio();
+    if (carMenuOpen) { closeCarMenu(); return; }
     if (dialogueOpen) { closeDialogue(); return; }
+
+    var car = findNearbyCar();
+    if (car) {
+      if (story.hasCar) { openCarMenu(); return; }
+      if (story.reputation >= CAR_REPUTATION_THRESHOLD) {
+        story.hasCar = true;
+        openDialogue('The old engine sputters, coughs, then catches. You\'ve got wheels now.');
+        showToast('You can drive now! 🚗 Visit the car anytime to travel between towns.', 2800);
+      } else {
+        openDialogue('"This old car won\'t start for just anyone. The town needs to trust you more first." (' + story.reputation + ' / ' + CAR_REPUTATION_THRESHOLD + ' reputation)');
+      }
+      return;
+    }
+
     var npc = findNearbyNpc();
     if (npc) { talkToNpc(npc); return; }
     var sign = findNearbySign();
@@ -1485,7 +1631,7 @@
           checkShardPickup();
           checkPortal();
         }
-      } else if (!dialogueOpen) {
+      } else if (!dialogueOpen && !carMenuOpen) {
         var dir = pressedDirs[pressedDirs.length - 1];
         if (dir) attemptMove(dir);
         var breathe = 1 + Math.sin(t * 2.4) * 0.015;
