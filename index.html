@@ -293,7 +293,7 @@
   //             // Boy's family uses SKIN_BROWN (0xa9714a) — pass it as the
   //             // literal since this data runs before those are defined.
   //             dialogue: { childhood: '...', diagnosis: '...', ... },
-  //             absentIn: ['grief']   // chapters this character doesn't appear in
+  //             absentFrom: 'grief'   // gone starting this chapter onward
   //           } }
   //         dialogue is looked up for the CURRENT story chapter, falling
   //         back to the closest earlier chapter that has a line — so a
@@ -323,7 +323,7 @@
             childhood: "\"An A-minus. Do you know what that tells me? That you stopped trying the moment it got hard.\"",
             diagnosis: "\"...I'm not as strong as I used to be. But I'm glad you're here.\""
           },
-          absentIn: ['grief']
+          absentFrom: 'grief'
         },
         M: {
           name: 'Mom',
@@ -390,11 +390,18 @@
   // different characters and dialogue. Advancing story.chapter and
   // reloading the current level is what moves the story forward; nothing
   // currently advances it past 'childhood' — that's the next piece to build.
-  var CHAPTERS = ['childhood', 'earning_respect', 'diagnosis', 'grief'];
+  // 'legacy' is the story's final state: respect fully earned.
+  var CHAPTERS = ['childhood', 'earning_respect', 'diagnosis', 'grief', 'legacy'];
   var story = { chapter: 'childhood' };
 
+  // absentFrom marks a character gone starting at that chapter and for
+  // every chapter after it (not just that one) — once someone is gone from
+  // the story, later chapters shouldn't accidentally bring them back.
   function npcAbsent(npcDef) {
-    return !!(npcDef.absentIn && npcDef.absentIn.indexOf(story.chapter) !== -1);
+    if (!npcDef.absentFrom) return false;
+    var curIdx = CHAPTERS.indexOf(story.chapter);
+    var fromIdx = CHAPTERS.indexOf(npcDef.absentFrom);
+    return fromIdx !== -1 && curIdx >= fromIdx;
   }
   function dialogueFor(npcDef) {
     var idx = CHAPTERS.indexOf(story.chapter);
