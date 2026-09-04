@@ -293,12 +293,20 @@
   //             // Boy's family uses SKIN_BROWN (0xa9714a) — pass it as the
   //             // literal since this data runs before those are defined.
   //             dialogue: { childhood: '...', diagnosis: '...', ... },
-  //             absentFrom: 'grief'   // gone starting this chapter onward
+  //             absentFrom: 'grief',  // gone starting this chapter onward
+  //             challenge: {            // optional — makes talking to this
+  //               key: 'violin',        // NPC a repeatable respect grind
+  //               threshold: 3,         // instead of static dialogue
+  //               progressLines: ['...', '...', '...'],
+  //               completeLine: '...',
+  //               learnedMessage: 'You learned the Violin! 🎻'  // shown once
+  //             }
   //           } }
   //         dialogue is looked up for the CURRENT story chapter, falling
   //         back to the closest earlier chapter that has a line — so a
   //         character only needs new dialogue for the chapters where what
-  //         they say actually changes.
+  //         they say actually changes. An NPC with `challenge` ignores
+  //         `dialogue` entirely — see talkToNpc().
   // ========================================================================
   var LEVELS = [
     {
@@ -341,7 +349,7 @@
       map: [
         "###################",
         "#........$........#",
-        "#..o..,,...b...o..#",
+        "#..o..,,..Vb...o..#",
         "#....=========....#",
         "#.o..=...,,,.=..o.#",
         "#....=..HHH..=....#",
@@ -359,6 +367,23 @@
         "A crooked signpost: \"Six Light Shards sleep in this clearing. Gather them all to wake the grove.\"",
         "Carved in the wood: \"The neighbors by the water are friendly — say hello if you pass by.\""
       ],
+      npcs: {
+        V: {
+          name: 'Maestro Alden',
+          appearance: { top: 0x6b2338, bottom: 0x2a2a30, hairStyle: 'short', hair: 0xc9c9c9 },
+          challenge: {
+            key: 'violin',
+            threshold: 3,
+            progressLines: [
+              "\"Hold the bow properly! Wrist loose, not limp. Again.\"",
+              "\"...Better. You might not be hopeless after all.\"",
+              "\"One more session. Prove to me you're serious.\""
+            ],
+            completeLine: "\"Alright. You've earned it — I'll teach you the violin, properly this time.\"",
+            learnedMessage: 'You learned the Violin! 🎻'
+          }
+        }
+      },
       exits: {
         '1': { to: 'hollow', x: 9, y: 4 },
         '2': { to: 'home', x: 5, y: 7 }
@@ -392,7 +417,10 @@
   // currently advances it past 'childhood' — that's the next piece to build.
   // 'legacy' is the story's final state: respect fully earned.
   var CHAPTERS = ['childhood', 'earning_respect', 'diagnosis', 'grief', 'legacy'];
-  var story = { chapter: 'childhood' };
+  // respect: per-challenge progress (see npcs.<letter>.challenge below),
+  // keyed by challenge id, e.g. respect.violin = 2.
+  // learned: which challenges have been completed, e.g. learned.violin = true.
+  var story = { chapter: 'childhood', respect: {}, learned: {} };
 
   // absentFrom marks a character gone starting at that chapter and for
   // every chapter after it (not just that one) — once someone is gone from
@@ -1095,11 +1123,37 @@
     return null;
   }
 
+  // NPCs with a `challenge` turn talking into a repeatable respect grind
+  // instead of a static line: each conversation nudges story.respect[key]
+  // up by one (with a line reacting to where you're at) until it reaches
+  // the threshold, at which point story.learned[key] is set once and the
+  // completion line plays from then on.
+  function talkToNpc(npc) {
+    var def = npc.def;
+    var ch = def.challenge;
+    if (!ch) { openDialogue(dialogueFor(def), def.name); return; }
+
+    var have = story.respect[ch.key] || 0;
+    if (have >= ch.threshold) {
+      if (!story.learned[ch.key]) {
+        story.learned[ch.key] = true;
+        showToast(ch.learnedMessage || ('You learned ' + ch.key + '!'), 2800);
+      }
+      openDialogue(ch.completeLine, def.name);
+      return;
+    }
+
+    story.respect[ch.key] = have + 1;
+    var line = ch.progressLines[Math.min(have, ch.progressLines.length - 1)];
+    openDialogue(line, def.name);
+    showToast('Respect: ' + (have + 1) + ' / ' + ch.threshold, 1600);
+  }
+
   function handleAction() {
     ensureAudio();
     if (dialogueOpen) { closeDialogue(); return; }
     var npc = findNearbyNpc();
-    if (npc) { openDialogue(dialogueFor(npc.def), npc.def.name); return; }
+    if (npc) { talkToNpc(npc); return; }
     var sign = findNearbySign();
     if (sign) openDialogue(sign.message);
   }
