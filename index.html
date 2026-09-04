@@ -581,7 +581,40 @@
     legR.castShadow = true;
     pivot.add(legR);
 
-    g.userData = { pivot: pivot, legL: legL, legR: legR, body: body, head: head };
+    // Sword: extends sideways (+X) from its pivot so rotating the pivot
+    // around Y sweeps the tip through a horizontal slash arc, readable
+    // from the tilted-down diorama camera. Hidden except while attacking.
+    var swordPivot = new THREE.Group();
+    swordPivot.position.set(0.22, 0.58, 0.1);
+    pivot.add(swordPivot);
+
+    var bladeMat = new THREE.MeshStandardMaterial({ color: 0xdfe6ee, metalness: 0.7, roughness: 0.25 });
+    var guardMat = new THREE.MeshStandardMaterial({ color: 0xf0a83c, metalness: 0.55, roughness: 0.35 });
+    var hiltMat = new THREE.MeshStandardMaterial({ color: 0x5b3620, roughness: 0.7 });
+
+    var blade = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.06, 0.035), bladeMat);
+    blade.position.x = 0.32;
+    blade.castShadow = true;
+    swordPivot.add(blade);
+
+    var tip = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.14, 4), bladeMat);
+    tip.rotation.z = -Math.PI / 2;
+    tip.position.x = 0.6;
+    tip.castShadow = true;
+    swordPivot.add(tip);
+
+    var guard = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.03, 0.16), guardMat);
+    guard.position.x = 0.06;
+    swordPivot.add(guard);
+
+    var hilt = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.16, 6), hiltMat);
+    hilt.rotation.z = Math.PI / 2;
+    hilt.position.x = -0.06;
+    swordPivot.add(hilt);
+
+    swordPivot.visible = false;
+
+    g.userData = { pivot: pivot, legL: legL, legR: legR, body: body, head: head, swordPivot: swordPivot };
     return g;
   }
 
@@ -671,6 +704,11 @@
   worldGroup.add(player.obj);
 
   var MOVE_DURATION = 0.17;
+  var ATTACK_DURATION = 0.26;
+  var ATTACK_COOLDOWN = 0.4;
+  var ATTACK_HIT_RADIUS = 1.05;
+  var SWORD_SWING_FROM = -1.5;
+  var SWORD_SWING_TO = 0.9;
   var MAX_SHARDS = TOTAL_SHARDS;
   var shardsCollected = 0;
 
@@ -715,11 +753,28 @@
     osc.start(t0);
     osc.stop(t0 + dur + 0.02);
   }
+  function sweep(freqFrom, freqTo, start, dur, type, gain) {
+    if (!audioCtx) return;
+    var osc = audioCtx.createOscillator();
+    var g = audioCtx.createGain();
+    osc.type = type || 'sine';
+    osc.connect(g);
+    g.connect(audioCtx.destination);
+    var t0 = audioCtx.currentTime + start;
+    osc.frequency.setValueAtTime(freqFrom, t0);
+    osc.frequency.exponentialRampToValueAtTime(freqTo, t0 + dur);
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(gain || 0.16, t0 + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.02);
+  }
   function sfxPickup() { tone(660, 0, 0.12, 'triangle'); tone(880, 0.07, 0.14, 'triangle'); tone(1180, 0.14, 0.2, 'triangle'); }
   function sfxHit() { tone(180, 0, 0.18, 'sawtooth', 0.22); tone(110, 0.05, 0.22, 'sawtooth', 0.18); }
   function sfxDefeat() { tone(500, 0, 0.08, 'square', 0.15); tone(260, 0.05, 0.12, 'square', 0.12); }
   function sfxWin() { [523, 659, 784, 1046].forEach(function (f, i) { tone(f, i * 0.12, 0.28, 'triangle'); }); }
   function sfxBump() { tone(140, 0, 0.06, 'square', 0.08); }
+  function sfxSwing() { sweep(900, 260, 0, 0.14, 'sawtooth', 0.1); }
 
   // ----------------------------------------------------------------------
   // HUD
@@ -820,18 +875,22 @@
 
   function performAttack() {
     if (player.attackCooldown > 0) return;
-    player.attackCooldown = 0.4;
-    player.attackAnim = 0.22;
-    var vec = DIR_VEC[player.facing];
-    var px = player.obj.position.x, pz = player.obj.position.z;
+    // Attack whichever direction is currently held (so "left + space" swings
+    // left even if the player hasn't finished turning to face that way yet);
+    // fall back to the last direction faced if no direction key is held.
+    var dir = pressedDirs.length ? pressedDirs[pressedDirs.length - 1] : player.facing;
+    player.facing = dir;
+    player.obj.rotation.y = DIR_ROT[dir];
+    player.attackCooldown = ATTACK_COOLDOWN;
+    player.attackAnim = ATTACK_DURATION;
+    sfxSwing();
+
+    var vec = DIR_VEC[dir];
+    var target = tileToWorld(player.tileX + vec.dx, player.tileY + vec.dz);
     enemies.forEach(function (en) {
       if (!en.alive) return;
-      var dx = en.obj.position.x - px, dz = en.obj.position.z - pz;
-      var dist = Math.sqrt(dx * dx + dz * dz);
-      if (dist > 1.7) return;
-      var len = Math.sqrt(dx * dx + dz * dz) || 1;
-      var dot = (dx / len) * vec.dx + (dz / len) * vec.dz;
-      if (dot > 0.35) defeatEnemy(en);
+      var dx = en.obj.position.x - target.x, dz = en.obj.position.z - target.z;
+      if (Math.sqrt(dx * dx + dz * dz) < ATTACK_HIT_RADIUS) defeatEnemy(en);
     });
   }
 
@@ -932,13 +991,18 @@
       }
 
       if (player.attackCooldown > 0) player.attackCooldown -= dt;
+      var swordPivot = player.obj.userData.swordPivot;
       if (player.attackAnim > 0) {
         player.attackAnim -= dt;
-        var lunge = Math.sin(Math.max(0, player.attackAnim) / 0.22 * Math.PI) * 0.22;
-        player.obj.userData.pivot.position.z = -lunge * (player.facing === 'down' ? -1 : player.facing === 'up' ? 1 : 0);
-        player.obj.userData.pivot.position.x = -lunge * (player.facing === 'right' ? -1 : player.facing === 'left' ? 1 : 0);
-      } else {
-        player.obj.userData.pivot.position.set(0, 0, 0);
+        var swingT = Math.min(1, 1 - Math.max(0, player.attackAnim) / ATTACK_DURATION);
+        var eased = 1 - Math.pow(1 - swingT, 2);
+        swordPivot.visible = true;
+        swordPivot.rotation.y = SWORD_SWING_FROM + (SWORD_SWING_TO - SWORD_SWING_FROM) * eased;
+        player.obj.userData.pivot.rotation.y = Math.sin(swingT * Math.PI) * 0.3;
+        if (player.attackAnim <= 0) {
+          swordPivot.visible = false;
+          player.obj.userData.pivot.rotation.y = 0;
+        }
       }
 
       if (player.invulnTimer > 0) {
