@@ -66,6 +66,21 @@
   }
   #shard-counter .icon { font-size: 1rem; filter: drop-shadow(0 0 6px rgba(120,220,255,0.8)); }
 
+  #stats-hud {
+    top: 16px; left: 16px;
+    display: flex; align-items: center; gap: 14px;
+    background: rgba(5,7,10,0.55);
+    border: 1px solid rgba(240,168,60,0.4);
+    border-radius: 999px;
+    padding: 7px 16px;
+    color: #ffd27a;
+    font-weight: 600;
+    font-size: 0.9rem;
+    letter-spacing: 0.3px;
+    backdrop-filter: blur(6px);
+  }
+  #stats-hud .icon { font-size: 1rem; margin-right: 6px; }
+
   #dialogue {
     left: 50%; bottom: 8%;
     transform: translateX(-50%) translateY(12px);
@@ -92,6 +107,15 @@
     letter-spacing: 0.5px;
     margin-bottom: 6px;
   }
+  #dialogue-link { display: none; margin-top: 10px; }
+  #dialogue-link a {
+    color: #7ee8ff;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  #dialogue-link a:hover { color: #ffd27a; }
   #dialogue .prompt {
     margin-top: 10px;
     font-size: 0.75rem;
@@ -100,6 +124,37 @@
     animation: blink 1.1s infinite;
   }
   @keyframes blink { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+
+  #tools-btn {
+    top: 16px; left: 50%; transform: translateX(-50%);
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    background: rgba(5,7,10,0.55);
+    border: 1px solid rgba(240,168,60,0.4);
+    font-size: 1.1rem;
+    backdrop-filter: blur(6px);
+    cursor: pointer;
+  }
+  #tools-btn:hover { border-color: #ffd27a; }
+  #tools-panel {
+    display: none;
+    top: 64px; left: 50%; transform: translateX(-50%);
+    flex-direction: column;
+    gap: 8px;
+    background: rgba(8,6,10,0.9);
+    border: 1px solid rgba(240,168,60,0.45);
+    border-radius: 12px;
+    padding: 12px 16px;
+    white-space: nowrap;
+  }
+  #tools-panel.open { display: flex; }
+  #tools-panel a {
+    color: #f7ece9;
+    font-size: 0.85rem;
+    font-weight: 600;
+    padding: 4px 6px;
+  }
+  #tools-panel a:hover { color: #ffd27a; }
 
   #toast {
     left: 50%; top: 14%;
@@ -225,10 +280,20 @@
   <div class="tilt-band bottom"></div>
   <div class="vignette"></div>
 
+  <div id="stats-hud" class="hud">
+    <span><span class="icon">&#128176;</span><span id="money-count-text">0</span></span>
+    <span><span class="icon">&#11088;</span><span id="reputation-count-text">0</span></span>
+  </div>
   <div id="shard-counter" class="hud"><span class="icon">&#10022;</span><span id="shard-count-text">0 / 0</span></div>
+  <button id="tools-btn" class="hud" title="shankFiddle tools">&#127932;</button>
+  <div id="tools-panel" class="hud">
+    <a href="../circle-of-fifths/" target="_blank" rel="noopener">&#127932; Circle of Fifths</a>
+    <a href="../fractal/" target="_blank" rel="noopener">&#127744; Fractal Explorer</a>
+  </div>
   <div id="dialogue" class="hud">
     <div id="dialogue-speaker"></div>
     <div id="dialogue-text"></div>
+    <div id="dialogue-link"></div>
     <div class="prompt">&#9660; space to close</div>
   </div>
   <div id="toast" class="hud"></div>
@@ -300,13 +365,18 @@
   //               progressLines: ['...', '...', '...'],
   //               completeLine: '...',
   //               learnedMessage: 'You learned the Violin! 🎻'  // shown once
-  //             }
+  //             },
+  //             job: {                  // optional — instead of dialogue or
+  //               pay: 5,               // a challenge, an indefinitely
+  //               reputation: 1,        // repeatable source of money and/or
+  //               lines: ['...', '...'] // general reputation. A random line
+  //             }                       // plays each time; no threshold.
   //           } }
   //         dialogue is looked up for the CURRENT story chapter, falling
   //         back to the closest earlier chapter that has a line — so a
   //         character only needs new dialogue for the chapters where what
-  //         they say actually changes. An NPC with `challenge` ignores
-  //         `dialogue` entirely — see talkToNpc().
+  //         they say actually changes. An NPC with `challenge` or `job`
+  //         ignores `dialogue` entirely — see talkToNpc().
   // ========================================================================
   var LEVELS = [
     {
@@ -347,7 +417,7 @@
       id: 'clearing',
       name: 'The Clearing',
       map: [
-        "###################",
+        "###########3#######",
         "#........$........#",
         "#..o..,,..Vb...o..#",
         "#....=========....#",
@@ -357,11 +427,11 @@
         "#....=========....#",
         "1.,......@.......$2",
         "#...~~~.....o,,.o.#",
-        "#..~~~~~..........#",
+        "#..~~~~~..F.K.....#",
         "#...~~~.......b...#",
         "#.$.........o...$.#",
         "#..$.,,.......,S..#",
-        "###################"
+        "#########4#########"
       ],
       signs: [
         "A crooked signpost: \"Six Light Shards sleep in this clearing. Gather them all to wake the grove.\"",
@@ -382,11 +452,39 @@
             completeLine: "\"Alright. You've earned it — I'll teach you the violin, properly this time.\"",
             learnedMessage: 'You learned the Violin! 🎻'
           }
+        },
+        F: {
+          name: 'Farmer Jono',
+          appearance: { top: 0x6f7d4a, bottom: 0x4a3a28, hairStyle: 'short', hair: 0x8a6a3a },
+          job: {
+            pay: 5,
+            reputation: 1,
+            lines: [
+              "\"Grab that hoe, we've got rows to weed.\"",
+              "\"Fields don't tend themselves. Thanks for the help.\"",
+              "\"Good hands. Come back anytime there's work.\""
+            ]
+          }
+        },
+        K: {
+          name: 'Elsie',
+          appearance: { top: 0x3f6b6b, bottom: 0x2a2a30, hairStyle: 'long', hair: 0xd8d0b0 },
+          job: {
+            pay: 3,
+            reputation: 1,
+            lines: [
+              "\"Welcome back! Everything's fresh today.\"",
+              "\"Help me restock the shelves and I'll make it worth your while.\"",
+              "\"You're becoming a familiar face around here.\""
+            ]
+          }
         }
       },
       exits: {
         '1': { to: 'hollow', x: 9, y: 4 },
-        '2': { to: 'home', x: 5, y: 7 }
+        '2': { to: 'home', x: 5, y: 7 },
+        '3': { to: 'riverside', x: 5, y: 7 },
+        '4': { to: 'meadow', x: 5, y: 7 }
       }
     },
     {
@@ -399,14 +497,97 @@
         "#...$.$...#",
         "#....@....1",
         "#.........#",
-        "#.........#",
+        "#....P....#",
         "#..o...o..#",
         "###########"
       ],
       signs: [
         "Scratched into stone: \"Two more shards glimmer deeper in the hollow.\""
       ],
+      npcs: {
+        P: {
+          name: 'Ms. Whitfield',
+          appearance: { top: 0x2a4a3a, bottom: 0x1f2a2a, hairStyle: 'long', hair: 0xb8b8b8 },
+          challenge: {
+            key: 'piano',
+            threshold: 3,
+            progressLines: [
+              "\"Fingers curved, not flat! You're playing piano, not slapping a table.\"",
+              "\"That's almost a melody. Almost.\"",
+              "\"Once more, and mean it this time.\""
+            ],
+            completeLine: "\"There. Now you're actually playing. I'll teach you properly from here.\"",
+            learnedMessage: 'You learned the Piano! 🎹'
+          }
+        }
+      },
       exits: { '1': { to: 'clearing', x: 1, y: 8 } }
+    },
+    {
+      id: 'riverside',
+      name: 'The Riverside',
+      map: [
+        "###########",
+        "#.........#",
+        "#..~~~....#",
+        "#.~~~~~.G.#",
+        "#..~~~....#",
+        "#....@....#",
+        "#,.......,#",
+        "#.........#",
+        "#####1#####"
+      ],
+      npcs: {
+        G: {
+          name: 'Jax',
+          appearance: { top: 0x3a5a8a, bottom: 0x8a7a5a, hairStyle: 'short', hair: 0x2a2018 },
+          challenge: {
+            key: 'guitar',
+            threshold: 3,
+            progressLines: [
+              "\"Nah man, you're strangling those strings. Loosen up.\"",
+              "\"Okay okay, that had a groove to it.\"",
+              "\"One more run-through and I'll know you're serious.\""
+            ],
+            completeLine: "\"Alright, you've got heart. Let's actually learn some guitar.\"",
+            learnedMessage: 'You learned the Guitar! 🎸'
+          }
+        }
+      },
+      exits: { '1': { to: 'clearing', x: 11, y: 1 } }
+    },
+    {
+      id: 'meadow',
+      name: 'The Meadow',
+      map: [
+        "###########",
+        "#.,.....,.#",
+        "#.........#",
+        "#....F....#",
+        "#.........#",
+        "#....@....#",
+        "#,.......,#",
+        "#.........#",
+        "#####1#####"
+      ],
+      npcs: {
+        F: {
+          name: 'Sora',
+          appearance: { top: 0xc9a84a, bottom: 0x5a4a3a, hairStyle: 'long', hair: 0x4a2f22 },
+          challenge: {
+            key: 'flute',
+            threshold: 3,
+            progressLines: [
+              "\"Breathe from your stomach, not your chest. Try again.\"",
+              "\"That was almost peaceful. Almost.\"",
+              "\"Once more, with your whole breath this time.\""
+            ],
+            completeLine: "\"Beautiful. Now let's really teach you the flute.\"",
+            learnedMessage: 'You learned the Flute! 🎶'
+          }
+        }
+      },
+      exits: { '1': { to: 'clearing', x: 9, y: 13 } }
     }
   ];
 
@@ -415,12 +596,15 @@
   // different characters and dialogue. Advancing story.chapter and
   // reloading the current level is what moves the story forward; nothing
   // currently advances it past 'childhood' — that's the next piece to build.
-  // 'legacy' is the story's final state: respect fully earned.
-  var CHAPTERS = ['childhood', 'earning_respect', 'diagnosis', 'grief', 'legacy'];
+  // 'duty' is the story's final state: respect fully earned.
+  var CHAPTERS = ['childhood', 'earning_respect', 'diagnosis', 'grief', 'duty'];
   // respect: per-challenge progress (see npcs.<letter>.challenge below),
   // keyed by challenge id, e.g. respect.violin = 2.
   // learned: which challenges have been completed, e.g. learned.violin = true.
-  var story = { chapter: 'childhood', respect: {}, learned: {} };
+  // money / reputation: earned from jobs (see npcs.<letter>.job below) —
+  // reputation is general community standing, distinct from the
+  // per-teacher respect a challenge tracks.
+  var story = { chapter: 'childhood', respect: {}, learned: {}, money: 0, reputation: 0 };
 
   // absentFrom marks a character gone starting at that chapter and for
   // every chapter after it (not just that one) — once someone is gone from
@@ -1040,14 +1224,38 @@
   var shardCountText = document.getElementById('shard-count-text');
   function renderShardCount() { shardCountText.textContent = world.shardsCollected + ' / ' + world.maxShards; }
 
+  var moneyCountText = document.getElementById('money-count-text');
+  var reputationCountText = document.getElementById('reputation-count-text');
+  function renderStats() {
+    moneyCountText.textContent = story.money;
+    reputationCountText.textContent = story.reputation;
+  }
+  renderStats();
+
   var dialogueEl = document.getElementById('dialogue');
   var dialogueSpeakerEl = document.getElementById('dialogue-speaker');
   var dialogueTextEl = document.getElementById('dialogue-text');
+  var dialogueLinkEl = document.getElementById('dialogue-link');
   var dialogueOpen = false;
-  function openDialogue(text, speaker) {
+  // link: optional { href, label } — used to point a conversation at one of
+  // the sibling shankFiddle tools (see the music challenges' tie-in to the
+  // Circle of Fifths in talkToNpc).
+  function openDialogue(text, speaker, link) {
     dialogueSpeakerEl.textContent = speaker || '';
     dialogueSpeakerEl.style.display = speaker ? 'block' : 'none';
     dialogueTextEl.textContent = text;
+    if (link) {
+      dialogueLinkEl.innerHTML = '';
+      var a = document.createElement('a');
+      a.href = link.href;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      a.textContent = link.label;
+      dialogueLinkEl.appendChild(a);
+      dialogueLinkEl.style.display = 'block';
+    } else {
+      dialogueLinkEl.style.display = 'none';
+    }
     dialogueEl.classList.add('open');
     dialogueOpen = true;
   }
@@ -1103,6 +1311,18 @@
   });
   document.getElementById('action-btn').addEventListener('pointerdown', function (e) { e.preventDefault(); handleAction(); });
 
+  // Persistent, chapter-independent link out to the sibling shankFiddle
+  // tools — paths are relative to this file's embedded location
+  // (shankfiddle-site/tools/boy/app.html), so they only resolve when Boy
+  // is running inside the site, not when opened standalone.
+  var TOOL_LINKS = {
+    circleOfFifths: { href: '../circle-of-fifths/', label: 'Circle of Fifths' },
+    fractal: { href: '../fractal/', label: 'Fractal Explorer' }
+  };
+  document.getElementById('tools-btn').addEventListener('click', function () {
+    document.getElementById('tools-panel').classList.toggle('open');
+  });
+
   function findNearbySign() {
     var signs = world.features.signs;
     for (var i = 0; i < signs.length; i++) {
@@ -1130,6 +1350,21 @@
   // completion line plays from then on.
   function talkToNpc(npc) {
     var def = npc.def;
+
+    if (def.job) {
+      var job = def.job;
+      story.money += job.pay || 0;
+      if (job.reputation) story.reputation += job.reputation;
+      renderStats();
+      var jobLine = job.lines[Math.floor(rand(0, job.lines.length))];
+      openDialogue(jobLine, def.name);
+      var parts = [];
+      if (job.pay) parts.push('+' + job.pay + ' 💰');
+      if (job.reputation) parts.push('+' + job.reputation + ' respect');
+      if (parts.length) showToast(parts.join('   '), 1600);
+      return;
+    }
+
     var ch = def.challenge;
     if (!ch) { openDialogue(dialogueFor(def), def.name); return; }
 
@@ -1139,7 +1374,13 @@
         story.learned[ch.key] = true;
         showToast(ch.learnedMessage || ('You learned ' + ch.key + '!'), 2800);
       }
-      openDialogue(ch.completeLine, def.name);
+      // Every challenge here is a musical instrument — once a teacher has
+      // taken you on, every later visit nudges you toward the Circle of
+      // Fifths to actually practice what they're teaching.
+      openDialogue(ch.completeLine, def.name, {
+        href: TOOL_LINKS.circleOfFifths.href,
+        label: 'Practice your scales in the Circle of Fifths →'
+      });
       return;
     }
 
