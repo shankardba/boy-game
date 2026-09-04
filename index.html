@@ -51,12 +51,6 @@
   /* ---- HUD ---- */
   .hud { position: absolute; z-index: 10; font-family: 'Inter', sans-serif; }
 
-  #hearts {
-    top: 16px; left: 16px;
-    display: flex; gap: 6px;
-  }
-  #hearts svg { width: 26px; height: 26px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.6)); }
-
   #shard-counter {
     top: 16px; right: 16px;
     display: flex; align-items: center; gap: 8px;
@@ -222,7 +216,6 @@
   <div class="tilt-band bottom"></div>
   <div class="vignette"></div>
 
-  <div id="hearts" class="hud"></div>
   <div id="shard-counter" class="hud"><span class="icon">&#10022;</span><span id="shard-count-text">0 / 0</span></div>
   <div id="dialogue" class="hud">
     <div id="dialogue-text"></div>
@@ -244,7 +237,7 @@
     <p class="tag">a tiny diorama adventure</p>
     <div class="controls">
       <div><b>Move</b>WASD / Arrow Keys</div>
-      <div><b>Interact &amp; Poke</b>Space</div>
+      <div><b>Talk &amp; Interact</b>Space</div>
       <div><b>Goal</b>Gather every Light Shard &#10022;</div>
     </div>
     <button id="begin-btn">Begin Adventure</button>
@@ -267,7 +260,6 @@
   //              H tiles becomes one house prop sized to fit them)
   //           S  sign (reads signs[] in the order signs are encountered
   //              scanning the grid top-to-bottom, left-to-right)
-  //           e  enemy spawn (wanders near its spawn point)
   //           $  collectible Light Shard
   //           @  player start (used when this level loads with no explicit
   //              spawn override, i.e. as the first level, or via loadLevel
@@ -297,15 +289,15 @@
         "#....=========....#",
         "1.,......@.......$#",
         "#...~~~.....o,,.o.#",
-        "#..~~~~~.....e....#",
+        "#..~~~~~..........#",
         "#...~~~.......b...#",
         "#.$.........o...$.#",
-        "#..$.,,..e....,S..#",
+        "#..$.,,.......,S..#",
         "###################"
       ],
       signs: [
         "A crooked signpost: \"Six Light Shards sleep in this clearing. Gather them all to wake the grove.\"",
-        "Carved in the wood: \"Mind the slimes near the water — give them a poke if they get too close.\""
+        "Carved in the wood: \"The neighbors by the water are friendly — say hello if you pass by.\""
       ],
       exits: { '1': { to: 'hollow', x: 9, y: 4 } }
     },
@@ -318,7 +310,7 @@
         "#.S.......#",
         "#...$.$...#",
         "#....@....1",
-        "#....e....#",
+        "#.........#",
         "#.........#",
         "#..o...o..#",
         "###########"
@@ -352,7 +344,7 @@
     var w = map[0].length, h = map.length;
     var exits = levelDef.exits || {};
     var obstacles = new Set();
-    var features = { trees: [], rocks: [], bushes: [], flowers: [], shards: [], signs: [], enemies: [], houseTiles: [], portals: [] };
+    var features = { trees: [], rocks: [], bushes: [], flowers: [], shards: [], signs: [], houseTiles: [], portals: [] };
     var groundKinds = [];
     var playerStart = { x: 1, y: 1 };
 
@@ -373,7 +365,6 @@
           case 'S': obstacles.add(key(x, y)); features.signs.push({ x: x, y: y, message: (levelDef.signs || [])[features.signs.length] || 'A weathered sign, worn smooth by rain.' }); break;
           case ',': features.flowers.push({ x: x, y: y }); break;
           case '$': features.shards.push({ x: x, y: y, collected: false }); break;
-          case 'e': features.enemies.push({ x: x, y: y }); break;
           case '@': playerStart = { x: x, y: y }; break;
         }
       }
@@ -608,27 +599,6 @@
     return g;
   }
 
-  function createBlob() {
-    var g = new THREE.Group();
-    var mat = new THREE.MeshStandardMaterial({ color: 0x8f5fd6, roughness: 0.55, emissive: 0x2a1240, emissiveIntensity: 0.3 });
-    var body = new THREE.Mesh(new THREE.SphereGeometry(0.34, 12, 10), mat);
-    body.position.y = 0.34;
-    body.castShadow = true;
-    g.add(body);
-    var eyeMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
-    var pupilMat = new THREE.MeshStandardMaterial({ color: 0x1a1020 });
-    [-0.11, 0.11].forEach(function (ex) {
-      var eye = new THREE.Mesh(new THREE.SphereGeometry(0.075, 8, 8), eyeMat);
-      eye.position.set(ex, 0.42, 0.28);
-      g.add(eye);
-      var pupil = new THREE.Mesh(new THREE.SphereGeometry(0.035, 6, 6), pupilMat);
-      pupil.position.set(ex, 0.42, 0.34);
-      g.add(pupil);
-    });
-    g.userData.body = body;
-    return g;
-  }
-
   function createPlayer() {
     var g = new THREE.Group();
     var tunicMat = new THREE.MeshStandardMaterial({ color: 0x2f6fb0, roughness: 0.7 });
@@ -669,40 +639,7 @@
     legR.castShadow = true;
     pivot.add(legR);
 
-    // Sword: extends sideways (+X) from its pivot so rotating the pivot
-    // around Y sweeps the tip through a horizontal slash arc, readable
-    // from the tilted-down diorama camera. Hidden except while attacking.
-    var swordPivot = new THREE.Group();
-    swordPivot.position.set(0.22, 0.58, 0.1);
-    pivot.add(swordPivot);
-
-    var bladeMat = new THREE.MeshStandardMaterial({ color: 0xdfe6ee, metalness: 0.7, roughness: 0.25 });
-    var guardMat = new THREE.MeshStandardMaterial({ color: 0xf0a83c, metalness: 0.55, roughness: 0.35 });
-    var hiltMat = new THREE.MeshStandardMaterial({ color: 0x5b3620, roughness: 0.7 });
-
-    var blade = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.06, 0.035), bladeMat);
-    blade.position.x = 0.32;
-    blade.castShadow = true;
-    swordPivot.add(blade);
-
-    var tip = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.14, 4), bladeMat);
-    tip.rotation.z = -Math.PI / 2;
-    tip.position.x = 0.6;
-    tip.castShadow = true;
-    swordPivot.add(tip);
-
-    var guard = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.03, 0.16), guardMat);
-    guard.position.x = 0.06;
-    swordPivot.add(guard);
-
-    var hilt = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.16, 6), hiltMat);
-    hilt.rotation.z = Math.PI / 2;
-    hilt.position.x = -0.06;
-    swordPivot.add(hilt);
-
-    swordPivot.visible = false;
-
-    g.userData = { pivot: pivot, legL: legL, legR: legR, body: body, head: head, swordPivot: swordPivot };
+    g.userData = { pivot: pivot, legL: legL, legR: legR, body: body, head: head };
     return g;
   }
 
@@ -759,95 +696,19 @@
 
     place(w.features.shards, createShard);
 
-    var enemies = w.features.enemies.map(function (f) {
-      var p = worldPos(w, f.x, f.y);
-      var obj = createBlob();
-      obj.position.set(p.x, 0, p.z);
-      group.add(obj);
-      return {
-        obj: obj,
-        spawn: { x: p.x, z: p.z },
-        target: { x: p.x, z: p.z },
-        alive: true,
-        retarget: 0,
-        respawnTimer: 0,
-        bobPhase: rand(0, Math.PI * 2)
-      };
-    });
-
-    return { group: group, waterTiles: waterTiles, enemies: enemies };
+    return { group: group, waterTiles: waterTiles };
   }
 
   function disposeGroup(group) {
     group.traverse(function (obj) {
       if (obj.isMesh) {
-        if (obj.geometry && obj.geometry !== DEBRIS_GEO) obj.geometry.dispose();
+        if (obj.geometry) obj.geometry.dispose();
         if (obj.material) {
           if (Array.isArray(obj.material)) obj.material.forEach(function (m) { m.dispose(); });
           else obj.material.dispose();
         }
       }
     });
-  }
-
-  // ----------------------------------------------------------------------
-  // Defeat explosions — chunky debris + an expanding flash ring, purely
-  // additive visual state updated each frame and discarded once expired.
-  // Parented to whichever level group is currently active.
-  // ----------------------------------------------------------------------
-  var effects = [];
-  var DEBRIS_GEO = new THREE.IcosahedronGeometry(0.09, 0);
-  var GRAVITY = 9;
-
-  function spawnExplosion(pos, color) {
-    var group = new THREE.Group();
-    group.position.copy(pos);
-    group.position.y += 0.34;
-    world.group.add(group);
-
-    var debrisMat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.5, transparent: true, opacity: 1 });
-    var pieces = [];
-    var count = 10;
-    for (var i = 0; i < count; i++) {
-      var piece = new THREE.Mesh(DEBRIS_GEO, debrisMat);
-      piece.scale.setScalar(rand(0.55, 1.3));
-      var angle = (i / count) * Math.PI * 2 + rand(-0.3, 0.3);
-      var speed = rand(1.6, 3.4);
-      piece.userData.vel = new THREE.Vector3(Math.cos(angle) * speed, rand(2.0, 3.6), Math.sin(angle) * speed);
-      piece.userData.spin = new THREE.Vector3(rand(-7, 7), rand(-7, 7), rand(-7, 7));
-      group.add(piece);
-      pieces.push(piece);
-    }
-
-    var flashMat = new THREE.MeshBasicMaterial({ color: 0xfff3d6, transparent: true, opacity: 0.85 });
-    var flash = new THREE.Mesh(new THREE.SphereGeometry(0.3, 10, 8), flashMat);
-    group.add(flash);
-
-    effects.push({ group: group, debrisMat: debrisMat, pieces: pieces, flash: flash, flashMat: flashMat, age: 0, life: 0.7 });
-  }
-
-  function updateEffects(dt) {
-    for (var i = effects.length - 1; i >= 0; i--) {
-      var fx = effects[i];
-      fx.age += dt;
-      var t = fx.age / fx.life;
-      if (t >= 1) {
-        world.group.remove(fx.group);
-        effects.splice(i, 1);
-        continue;
-      }
-      fx.pieces.forEach(function (p) {
-        p.userData.vel.y -= GRAVITY * dt;
-        p.position.addScaledVector(p.userData.vel, dt);
-        p.rotation.x += p.userData.spin.x * dt;
-        p.rotation.y += p.userData.spin.y * dt;
-        p.rotation.z += p.userData.spin.z * dt;
-      });
-      fx.debrisMat.opacity = 1 - t;
-      var flashT = Math.min(1, t / 0.3);
-      fx.flash.scale.setScalar(0.3 + flashT * 2.2);
-      fx.flashMat.opacity = (1 - flashT) * 0.85;
-    }
   }
 
   // ----------------------------------------------------------------------
@@ -859,7 +720,7 @@
   // The player's facing direction is remembered independent of movement —
   // set the instant a direction is pressed, not deferred to the next move
   // tick, so even a very quick tap (or a tap+release inside one frame)
-  // still turns the character and is remembered for a direction-less attack.
+  // still turns the character to face that way.
   function setFacing(dir) {
     player.facing = dir;
     player.obj.rotation.y = DIR_ROT[dir];
@@ -873,20 +734,10 @@
     isMoving: false,
     moveElapsed: 0,
     from: null,
-    to: null,
-    hearts: 3,
-    maxHearts: 3,
-    invulnTimer: 0,
-    attackCooldown: 0,
-    attackAnim: 0
+    to: null
   };
 
   var MOVE_DURATION = 0.17;
-  var ATTACK_DURATION = 0.26;
-  var ATTACK_COOLDOWN = 0.4;
-  var ATTACK_HIT_RADIUS = 1.05;
-  var SWORD_SWING_FROM = -1.5;
-  var SWORD_SWING_TO = 0.9;
 
   // ----------------------------------------------------------------------
   // Camera
@@ -916,7 +767,6 @@
     var built = buildWorldGroup(newWorld);
     newWorld.group = built.group;
     newWorld.waterTiles = built.waterTiles;
-    newWorld.enemies = built.enemies;
     newWorld.shardsCollected = 0;
     newWorld.maxShards = newWorld.totalShards;
 
@@ -924,7 +774,6 @@
       scene.remove(world.group);
       disposeGroup(world.group);
     }
-    effects.length = 0;
 
     world = newWorld;
     scene.add(world.group);
@@ -983,46 +832,14 @@
     osc.start(t0);
     osc.stop(t0 + dur + 0.02);
   }
-  function sweep(freqFrom, freqTo, start, dur, type, gain) {
-    if (!audioCtx) return;
-    var osc = audioCtx.createOscillator();
-    var g = audioCtx.createGain();
-    osc.type = type || 'sine';
-    osc.connect(g);
-    g.connect(audioCtx.destination);
-    var t0 = audioCtx.currentTime + start;
-    osc.frequency.setValueAtTime(freqFrom, t0);
-    osc.frequency.exponentialRampToValueAtTime(freqTo, t0 + dur);
-    g.gain.setValueAtTime(0, t0);
-    g.gain.linearRampToValueAtTime(gain || 0.16, t0 + 0.015);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-    osc.start(t0);
-    osc.stop(t0 + dur + 0.02);
-  }
   function sfxPickup() { tone(660, 0, 0.12, 'triangle'); tone(880, 0.07, 0.14, 'triangle'); tone(1180, 0.14, 0.2, 'triangle'); }
-  function sfxHit() { tone(180, 0, 0.18, 'sawtooth', 0.22); tone(110, 0.05, 0.22, 'sawtooth', 0.18); }
-  function sfxDefeat() { tone(500, 0, 0.08, 'square', 0.15); tone(260, 0.05, 0.12, 'square', 0.12); sweep(240, 50, 0, 0.22, 'sawtooth', 0.16); }
   function sfxWin() { [523, 659, 784, 1046].forEach(function (f, i) { tone(f, i * 0.12, 0.28, 'triangle'); }); }
   function sfxBump() { tone(140, 0, 0.06, 'square', 0.08); }
-  function sfxSwing() { sweep(900, 260, 0, 0.14, 'sawtooth', 0.1); }
   function sfxPortal() { tone(440, 0, 0.14, 'sine', 0.14); tone(660, 0.08, 0.2, 'sine', 0.14); tone(880, 0.16, 0.26, 'sine', 0.12); }
 
   // ----------------------------------------------------------------------
   // HUD
   // ----------------------------------------------------------------------
-  var heartsEl = document.getElementById('hearts');
-  function heartSVG(filled) {
-    var fill = filled ? '#ff2ea6' : 'rgba(255,255,255,0.12)';
-    var stroke = filled ? '#ffd27a' : 'rgba(240,168,60,0.4)';
-    return '<svg viewBox="0 0 32 29" xmlns="http://www.w3.org/2000/svg"><path d="M16 28 C16 28 2 18.5 2 9.8 C2 4.9 5.8 1.5 10 1.5 C12.8 1.5 15 3 16 5.2 C17 3 19.2 1.5 22 1.5 C26.2 1.5 30 4.9 30 9.8 C30 18.5 16 28 16 28 Z" fill="' + fill + '" stroke="' + stroke + '" stroke-width="1.4"/></svg>';
-  }
-  function renderHearts() {
-    var html = '';
-    for (var i = 0; i < player.maxHearts; i++) html += heartSVG(i < player.hearts);
-    heartsEl.innerHTML = html;
-  }
-  renderHearts();
-
   var shardCountText = document.getElementById('shard-count-text');
   function renderShardCount() { shardCountText.textContent = world.shardsCollected + ' / ' + world.maxShards; }
 
@@ -1100,40 +917,7 @@
     ensureAudio();
     if (dialogueOpen) { closeDialogue(); return; }
     var sign = findNearbySign();
-    if (sign) { openDialogue(sign.message); return; }
-    performAttack();
-  }
-
-  function performAttack() {
-    if (player.attackCooldown > 0) return;
-    // Attack whichever direction is currently held (so "left + space" swings
-    // left even if the player hasn't finished turning to face that way yet);
-    // fall back to the last direction faced if no direction key is held.
-    var dir = pressedDirs.length ? pressedDirs[pressedDirs.length - 1] : player.facing;
-    setFacing(dir);
-    player.attackCooldown = ATTACK_COOLDOWN;
-    player.attackAnim = ATTACK_DURATION;
-    sfxSwing();
-
-    var vec = DIR_VEC[dir];
-    var target = tileToWorld(player.tileX + vec.dx, player.tileY + vec.dz);
-    var here = tileToWorld(player.tileX, player.tileY);
-    world.enemies.forEach(function (en) {
-      if (!en.alive) return;
-      var dx1 = en.obj.position.x - target.x, dz1 = en.obj.position.z - target.z;
-      var dx2 = en.obj.position.x - here.x, dz2 = en.obj.position.z - here.z;
-      var hitsTargetTile = Math.sqrt(dx1 * dx1 + dz1 * dz1) < ATTACK_HIT_RADIUS;
-      var hitsOwnTile = Math.sqrt(dx2 * dx2 + dz2 * dz2) < ATTACK_HIT_RADIUS;
-      if (hitsTargetTile || hitsOwnTile) defeatEnemy(en);
-    });
-  }
-
-  function defeatEnemy(en) {
-    en.alive = false;
-    en.obj.visible = false;
-    en.respawnTimer = 6;
-    spawnExplosion(en.obj.position, 0x8f5fd6);
-    sfxDefeat();
+    if (sign) openDialogue(sign.message);
   }
 
   // ----------------------------------------------------------------------
@@ -1198,17 +982,6 @@
     }
   }
 
-  function respawnPlayer() {
-    player.tileX = world.playerStart.x;
-    player.tileY = world.playerStart.y;
-    var p = tileToWorld(player.tileX, player.tileY);
-    player.obj.position.set(p.x, 0, p.z);
-    player.isMoving = false;
-    player.hearts = player.maxHearts;
-    renderHearts();
-    showToast('A warm light carries you back...', 2200);
-  }
-
   var clock = new THREE.Clock();
 
   function update() {
@@ -1239,75 +1012,6 @@
         var breathe = 1 + Math.sin(t * 2.4) * 0.015;
         player.obj.userData.pivot.scale.set(1, breathe, 1);
       }
-
-      if (player.attackCooldown > 0) player.attackCooldown -= dt;
-      var swordPivot = player.obj.userData.swordPivot;
-      if (player.attackAnim > 0) {
-        player.attackAnim -= dt;
-        var swingT = Math.min(1, 1 - Math.max(0, player.attackAnim) / ATTACK_DURATION);
-        var eased = 1 - Math.pow(1 - swingT, 2);
-        swordPivot.visible = true;
-        swordPivot.rotation.y = SWORD_SWING_FROM + (SWORD_SWING_TO - SWORD_SWING_FROM) * eased;
-        player.obj.userData.pivot.rotation.y = Math.sin(swingT * Math.PI) * 0.3;
-        if (player.attackAnim <= 0) {
-          swordPivot.visible = false;
-          player.obj.userData.pivot.rotation.y = 0;
-        }
-      }
-
-      if (player.invulnTimer > 0) {
-        player.invulnTimer -= dt;
-        player.obj.visible = Math.floor(t * 14) % 2 === 0;
-        if (player.invulnTimer <= 0) player.obj.visible = true;
-      }
-
-      // enemies: wander near spawn, squash-stretch bob, check contact damage
-      world.enemies.forEach(function (en) {
-        if (!en.alive) {
-          en.respawnTimer -= dt;
-          if (en.respawnTimer <= 0) {
-            en.alive = true;
-            en.obj.visible = true;
-            en.obj.position.set(en.spawn.x, 0, en.spawn.z);
-            en.target = { x: en.spawn.x, z: en.spawn.z };
-          }
-          return;
-        }
-        en.retarget -= dt;
-        if (en.retarget <= 0) {
-          en.retarget = rand(1.4, 2.6);
-          var ang = rand(0, Math.PI * 2), r = rand(0.3, 1.6);
-          en.target = { x: en.spawn.x + Math.cos(ang) * r, z: en.spawn.z + Math.sin(ang) * r };
-        }
-        var ex = en.obj.position.x, ez = en.obj.position.z;
-        var tdx = en.target.x - ex, tdz = en.target.z - ez;
-        var tdist = Math.sqrt(tdx * tdx + tdz * tdz);
-        if (tdist > 0.05) {
-          var speed = 0.7 * dt;
-          en.obj.position.x += (tdx / tdist) * speed;
-          en.obj.position.z += (tdz / tdist) * speed;
-          en.obj.rotation.y = Math.atan2(tdx, tdz);
-        }
-        en.bobPhase += dt * 5;
-        var squash = 1 + Math.sin(en.bobPhase) * 0.12;
-        en.obj.userData.body.scale.set(1 / squash, squash, 1 / squash);
-
-        if (player.invulnTimer <= 0) {
-          var dx = en.obj.position.x - player.obj.position.x;
-          var dz = en.obj.position.z - player.obj.position.z;
-          if (Math.sqrt(dx * dx + dz * dz) < 0.85) {
-            player.hearts--;
-            renderHearts();
-            sfxHit();
-            player.invulnTimer = 1.3;
-            if (player.hearts <= 0) {
-              setTimeout(respawnPlayer, 200);
-            }
-          }
-        }
-      });
-
-      updateEffects(dt);
 
       world.waterTiles.forEach(function (wt) {
         wt.mesh.position.y = wt.baseY + Math.sin(t * 1.6 + wt.phase) * 0.03;
