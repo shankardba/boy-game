@@ -83,6 +83,15 @@
     transition: opacity 0.2s ease, transform 0.2s ease;
   }
   #dialogue.open { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+  #dialogue-speaker {
+    display: none;
+    font-family: 'Cinzel', serif;
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: #ffd27a;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+  }
   #dialogue .prompt {
     margin-top: 10px;
     font-size: 0.75rem;
@@ -218,6 +227,7 @@
 
   <div id="shard-counter" class="hud"><span class="icon">&#10022;</span><span id="shard-count-text">0 / 0</span></div>
   <div id="dialogue" class="hud">
+    <div id="dialogue-speaker"></div>
     <div id="dialogue-text"></div>
     <div class="prompt">&#9660; space to close</div>
   </div>
@@ -238,7 +248,7 @@
     <div class="controls">
       <div><b>Move</b>WASD / Arrow Keys</div>
       <div><b>Talk &amp; Interact</b>Space</div>
-      <div><b>Goal</b>Gather every Light Shard &#10022;</div>
+      <div><b>Goal</b>Talk to everyone you meet</div>
     </div>
     <button id="begin-btn">Begin Adventure</button>
   </div>
@@ -259,7 +269,8 @@
   //           b  bush                     H  house footprint (any block of
   //              H tiles becomes one house prop sized to fit them)
   //           S  sign (reads signs[] in the order signs are encountered
-  //              scanning the grid top-to-bottom, left-to-right)
+  //              scanning the grid top-to-bottom, left-to-right) — plain
+  //              environmental flavor text, not a character
   //           $  collectible Light Shard
   //           @  player start (used when this level loads with no explicit
   //              spawn override, i.e. as the first level, or via loadLevel
@@ -269,12 +280,61 @@
   //              level at the tile given there. Reuse the same digit for
   //              more than one portal within a level, or different digits
   //              for several distinct exits.
+  //           any other letter used as a key in this level's `npcs` — a
+  //              named character. See `npcs` below.
   //
   // signs:  array of dialogue strings, matched to 'S' tiles in scan order.
   // exits:  { '<digit>': { to: '<level id>', x: <tx>, y: <ty> } } — arrival
   //         tile in the destination level, in that level's own coordinates.
+  // npcs:   { '<letter>': {
+  //             name: 'Mom',
+  //             appearance: { top, bottom, skin, hair, hairStyle, skirt },
+  //             // skin defaults to SKIN_LIGHT (everyone else in the world);
+  //             // Boy's family uses SKIN_BROWN (0xa9714a) — pass it as the
+  //             // literal since this data runs before those are defined.
+  //             dialogue: { childhood: '...', diagnosis: '...', ... },
+  //             absentIn: ['grief']   // chapters this character doesn't appear in
+  //           } }
+  //         dialogue is looked up for the CURRENT story chapter, falling
+  //         back to the closest earlier chapter that has a line — so a
+  //         character only needs new dialogue for the chapters where what
+  //         they say actually changes.
   // ========================================================================
   var LEVELS = [
+    {
+      id: 'home',
+      name: 'Home',
+      map: [
+        "###########",
+        "#.........#",
+        "#..HHH....#",
+        "#..HHH..D.#",
+        "#.........#",
+        "#....@...M#",
+        "#,.......,#",
+        "#.........#",
+        "#####2#####"
+      ],
+      npcs: {
+        D: {
+          name: 'Dad',
+          appearance: { top: 0x4b5566, bottom: 0x2a2730, hairStyle: 'short', skin: 0xa9714a },
+          dialogue: {
+            childhood: "\"An A-minus. Do you know what that tells me? That you stopped trying the moment it got hard.\"",
+            diagnosis: "\"...I'm not as strong as I used to be. But I'm glad you're here.\""
+          },
+          absentIn: ['grief']
+        },
+        M: {
+          name: 'Mom',
+          appearance: { top: 0xa8536b, bottom: 0x3a2a35, hairStyle: 'long', skirt: true, skin: 0xa9714a },
+          dialogue: {
+            childhood: "\"Your father's right. In this house, 'good enough' isn't. We didn't raise you to be ordinary.\""
+          }
+        }
+      },
+      exits: { '2': { to: 'clearing', x: 16, y: 8 } }
+    },
     {
       id: 'clearing',
       name: 'The Clearing',
@@ -287,7 +347,7 @@
         "#....=..HHH..=....#",
         "#..S.=..HHH..=..$.#",
         "#....=========....#",
-        "1.,......@.......$#",
+        "1.,......@.......$2",
         "#...~~~.....o,,.o.#",
         "#..~~~~~..........#",
         "#...~~~.......b...#",
@@ -299,7 +359,10 @@
         "A crooked signpost: \"Six Light Shards sleep in this clearing. Gather them all to wake the grove.\"",
         "Carved in the wood: \"The neighbors by the water are friendly — say hello if you pass by.\""
       ],
-      exits: { '1': { to: 'hollow', x: 9, y: 4 } }
+      exits: {
+        '1': { to: 'hollow', x: 9, y: 4 },
+        '2': { to: 'home', x: 5, y: 7 }
+      }
     },
     {
       id: 'hollow',
@@ -322,6 +385,25 @@
     }
   ];
 
+  // Story progression — separate from any single level, since the same
+  // place (like Home) needs to exist across multiple chapters with
+  // different characters and dialogue. Advancing story.chapter and
+  // reloading the current level is what moves the story forward; nothing
+  // currently advances it past 'childhood' — that's the next piece to build.
+  var CHAPTERS = ['childhood', 'earning_respect', 'diagnosis', 'grief'];
+  var story = { chapter: 'childhood' };
+
+  function npcAbsent(npcDef) {
+    return !!(npcDef.absentIn && npcDef.absentIn.indexOf(story.chapter) !== -1);
+  }
+  function dialogueFor(npcDef) {
+    var idx = CHAPTERS.indexOf(story.chapter);
+    for (var i = idx; i >= 0; i--) {
+      if (npcDef.dialogue[CHAPTERS[i]]) return npcDef.dialogue[CHAPTERS[i]];
+    }
+    return npcDef.dialogue.default || '...';
+  }
+
   var TILE = 2;
 
   function key(tx, ty) { return tx + ',' + ty; }
@@ -343,8 +425,9 @@
     var map = levelDef.map;
     var w = map[0].length, h = map.length;
     var exits = levelDef.exits || {};
+    var npcs = levelDef.npcs || {};
     var obstacles = new Set();
-    var features = { trees: [], rocks: [], bushes: [], flowers: [], shards: [], signs: [], houseTiles: [], portals: [] };
+    var features = { trees: [], rocks: [], bushes: [], flowers: [], shards: [], signs: [], houseTiles: [], portals: [], npcs: [] };
     var groundKinds = [];
     var playerStart = { x: 1, y: 1 };
 
@@ -354,6 +437,13 @@
         var c = map[y][x];
         if (exits[c]) {
           features.portals.push({ x: x, y: y, to: exits[c].to, spawn: { x: exits[c].x, y: exits[c].y } });
+          continue;
+        }
+        if (npcs[c]) {
+          if (!npcAbsent(npcs[c])) {
+            obstacles.add(key(x, y));
+            features.npcs.push({ x: x, y: y, def: npcs[c] });
+          }
           continue;
         }
         switch (c) {
@@ -438,6 +528,12 @@
     return new THREE.Color(0x5fae4c).offsetHSL(rand(-0.02, 0.02), rand(-0.05, 0.05), rand(-0.04, 0.03));
   }
   var PORTAL_TILE_COLOR = 0x554a66;
+
+  // Boy is telling his own story: he and his family (Mom, Dad) are Indian
+  // — everyone else in the world defaults to SKIN_LIGHT unless an NPC's
+  // appearance explicitly overrides it.
+  var SKIN_LIGHT = 0xe8b58c;
+  var SKIN_BROWN = 0xa9714a;
 
   function createTree() {
     var g = new THREE.Group();
@@ -599,10 +695,68 @@
     return g;
   }
 
+  // Generic adult NPC — same low-poly-diorama vocabulary as the player,
+  // but taller proportions and customizable clothing/hair so Mom, Dad, and
+  // every future townsperson can share one builder.
+  function createHuman(opts) {
+    opts = opts || {};
+    var skinColor = opts.skin || SKIN_LIGHT;
+    var hairColor = opts.hair || 0x3a2a22;
+    var topColor = opts.top || 0x6b7a8f;
+    var bottomColor = opts.bottom || 0x2e2a35;
+
+    var g = new THREE.Group();
+    var pivot = new THREE.Group();
+    g.add(pivot);
+
+    var body = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.27, 0.5, 4, 8),
+      new THREE.MeshStandardMaterial({ color: topColor, roughness: 0.7 })
+    );
+    body.position.y = 0.63;
+    body.castShadow = true;
+    pivot.add(body);
+
+    var head = new THREE.Mesh(new THREE.SphereGeometry(0.23, 14, 12), new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.6 }));
+    head.position.y = 1.28;
+    head.castShadow = true;
+    pivot.add(head);
+
+    var hairMat = new THREE.MeshStandardMaterial({ color: hairColor, roughness: 0.7 });
+    var hair;
+    if (opts.hairStyle === 'long') {
+      hair = new THREE.Mesh(new THREE.SphereGeometry(0.25, 14, 12, 0, Math.PI * 2, 0, Math.PI * 0.8), hairMat);
+      hair.position.y = 1.24;
+    } else {
+      hair = new THREE.Mesh(new THREE.SphereGeometry(0.24, 14, 12, 0, Math.PI * 2, 0, Math.PI * 0.55), hairMat);
+      hair.position.y = 1.32;
+    }
+    pivot.add(hair);
+
+    if (opts.skirt) {
+      var skirt = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.4, 10), new THREE.MeshStandardMaterial({ color: bottomColor, roughness: 0.75 }));
+      skirt.position.y = 0.22;
+      skirt.castShadow = true;
+      pivot.add(skirt);
+    } else {
+      var legGeo = new THREE.CylinderGeometry(0.09, 0.09, 0.42, 8);
+      var legMat = new THREE.MeshStandardMaterial({ color: bottomColor });
+      [-0.13, 0.13].forEach(function (lx) {
+        var leg = new THREE.Mesh(legGeo, legMat);
+        leg.position.set(lx, 0.21, 0);
+        leg.castShadow = true;
+        pivot.add(leg);
+      });
+    }
+
+    g.userData = { pivot: pivot, idlePhase: rand(0, Math.PI * 2) };
+    return g;
+  }
+
   function createPlayer() {
     var g = new THREE.Group();
     var tunicMat = new THREE.MeshStandardMaterial({ color: 0x2f6fb0, roughness: 0.7 });
-    var skinMat = new THREE.MeshStandardMaterial({ color: 0xe8b58c, roughness: 0.6 });
+    var skinMat = new THREE.MeshStandardMaterial({ color: SKIN_BROWN, roughness: 0.6 });
     var hairMat = new THREE.MeshStandardMaterial({ color: 0x4a2f22, roughness: 0.7 });
     var scarfMat = new THREE.MeshStandardMaterial({ color: 0xd6432f, roughness: 0.6 });
 
@@ -695,6 +849,14 @@
     }
 
     place(w.features.shards, createShard);
+
+    w.features.npcs.forEach(function (n) {
+      var p = worldPos(w, n.x, n.y);
+      var obj = createHuman(n.def.appearance);
+      obj.position.set(p.x, 0, p.z);
+      group.add(obj);
+      n.obj = obj;
+    });
 
     return { group: group, waterTiles: waterTiles };
   }
@@ -844,9 +1006,12 @@
   function renderShardCount() { shardCountText.textContent = world.shardsCollected + ' / ' + world.maxShards; }
 
   var dialogueEl = document.getElementById('dialogue');
+  var dialogueSpeakerEl = document.getElementById('dialogue-speaker');
   var dialogueTextEl = document.getElementById('dialogue-text');
   var dialogueOpen = false;
-  function openDialogue(text) {
+  function openDialogue(text, speaker) {
+    dialogueSpeakerEl.textContent = speaker || '';
+    dialogueSpeakerEl.style.display = speaker ? 'block' : 'none';
     dialogueTextEl.textContent = text;
     dialogueEl.classList.add('open');
     dialogueOpen = true;
@@ -913,9 +1078,21 @@
     return null;
   }
 
+  function findNearbyNpc() {
+    var npcs = world.features.npcs;
+    for (var i = 0; i < npcs.length; i++) {
+      var n = npcs[i];
+      var dx = Math.abs(n.x - player.tileX), dy = Math.abs(n.y - player.tileY);
+      if (dx + dy <= 1) return n;
+    }
+    return null;
+  }
+
   function handleAction() {
     ensureAudio();
     if (dialogueOpen) { closeDialogue(); return; }
+    var npc = findNearbyNpc();
+    if (npc) { openDialogue(dialogueFor(npc.def), npc.def.name); return; }
     var sign = findNearbySign();
     if (sign) openDialogue(sign.message);
   }
@@ -1024,6 +1201,11 @@
       world.features.portals.forEach(function (p) {
         if (!p.obj) return;
         p.obj.userData.bob.position.y = 0.58 + Math.sin(t * 3 + p.x) * 0.06;
+      });
+      world.features.npcs.forEach(function (n) {
+        if (!n.obj) return;
+        var breathe = 1 + Math.sin(t * 1.8 + n.obj.userData.idlePhase) * 0.012;
+        n.obj.userData.pivot.scale.set(1, breathe, 1);
       });
 
       var desiredCamPos = player.obj.position.clone().add(camOffset);
