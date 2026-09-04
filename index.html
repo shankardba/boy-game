@@ -256,72 +256,145 @@
 (function () {
   'use strict';
 
-  // ----------------------------------------------------------------------
-  // Map — hand-authored ASCII layout. Every row must be the same width.
-  // # tree/border  .  grass   , flowers   = path   o rock   ~ water
-  // b bush   H house footprint   S sign   e enemy spawn   $ shard   @ player start
-  // ----------------------------------------------------------------------
-  var MAP = [
-    "###################",
-    "#........$........#",
-    "#..o..,,...b...o..#",
-    "#....=========....#",
-    "#.o..=...,,,.=..o.#",
-    "#....=..HHH..=....#",
-    "#..S.=..HHH..=..$.#",
-    "#....=========....#",
-    "#.,......@.......$#",
-    "#...~~~.....o,,.o.#",
-    "#..~~~~~.....e....#",
-    "#...~~~.......b...#",
-    "#.$.........o...$.#",
-    "#..$.,,..e....,S..#",
-    "###################"
+  // ========================================================================
+  // LEVELS — this is the whole authoring surface. Add a new level by adding
+  // a new entry here; nothing below this block needs to change.
+  //
+  // map:    array of equal-length strings (the grid). Legend:
+  //           #  tree / solid border      .  grass          , flowers
+  //           =  path                     o  rock            ~ water
+  //           b  bush                     H  house footprint (any block of
+  //              H tiles becomes one house prop sized to fit them)
+  //           S  sign (reads signs[] in the order signs are encountered
+  //              scanning the grid top-to-bottom, left-to-right)
+  //           e  enemy spawn (wanders near its spawn point)
+  //           $  collectible Light Shard
+  //           @  player start (used when this level loads with no explicit
+  //              spawn override, i.e. as the first level, or via loadLevel
+  //              with no spawn argument)
+  //           1-9 exit portal — walking onto a digit tile used as a key in
+  //              this level's `exits` teleports the player into another
+  //              level at the tile given there. Reuse the same digit for
+  //              more than one portal within a level, or different digits
+  //              for several distinct exits.
+  //
+  // signs:  array of dialogue strings, matched to 'S' tiles in scan order.
+  // exits:  { '<digit>': { to: '<level id>', x: <tx>, y: <ty> } } — arrival
+  //         tile in the destination level, in that level's own coordinates.
+  // ========================================================================
+  var LEVELS = [
+    {
+      id: 'clearing',
+      name: 'The Clearing',
+      map: [
+        "###################",
+        "#........$........#",
+        "#..o..,,...b...o..#",
+        "#....=========....#",
+        "#.o..=...,,,.=..o.#",
+        "#....=..HHH..=....#",
+        "#..S.=..HHH..=..$.#",
+        "#....=========....#",
+        "1.,......@.......$#",
+        "#...~~~.....o,,.o.#",
+        "#..~~~~~.....e....#",
+        "#...~~~.......b...#",
+        "#.$.........o...$.#",
+        "#..$.,,..e....,S..#",
+        "###################"
+      ],
+      signs: [
+        "A crooked signpost: \"Six Light Shards sleep in this clearing. Gather them all to wake the grove.\"",
+        "Carved in the wood: \"Mind the slimes near the water — give them a poke if they get too close.\""
+      ],
+      exits: { '1': { to: 'hollow', x: 9, y: 4 } }
+    },
+    {
+      id: 'hollow',
+      name: 'The Hollow',
+      map: [
+        "###########",
+        "#..o...o..#",
+        "#.S.......#",
+        "#...$.$...#",
+        "#....@....1",
+        "#....e....#",
+        "#.........#",
+        "#..o...o..#",
+        "###########"
+      ],
+      signs: [
+        "Scratched into stone: \"Two more shards glimmer deeper in the hollow.\""
+      ],
+      exits: { '1': { to: 'clearing', x: 1, y: 8 } }
+    }
   ];
 
   var TILE = 2;
-  var W = MAP[0].length;
-  var H = MAP.length;
-  var ORIGIN_X = (W - 1) / 2;
-  var ORIGIN_Z = (H - 1) / 2;
 
-  var SIGN_MESSAGES = [
-    "A crooked signpost: \"Six Light Shards sleep in this clearing. Gather them all to wake the grove.\"",
-    "Carved in the wood: \"Mind the slimes near the water — give them a poke if they get too close.\""
-  ];
-
-  function tileToWorld(tx, ty) {
-    return { x: (tx - ORIGIN_X) * TILE, z: (ty - ORIGIN_Z) * TILE };
-  }
   function key(tx, ty) { return tx + ',' + ty; }
+  function rand(a, b) { return a + Math.random() * (b - a); }
 
-  var obstacles = new Set();
-  var features = { trees: [], rocks: [], bushes: [], flowers: [], shards: [], signs: [], enemies: [], houseTiles: [] };
-  var groundKinds = []; // per-row array of chars used to pick tile color
-  var playerStart = { x: 1, y: 1 };
+  // Pure — takes an explicit world so it's safe to use while building a
+  // level that isn't the active one yet (see buildWorldGroup).
+  function worldPos(w, tx, ty) {
+    return { x: (tx - w.ORIGIN_X) * TILE, z: (ty - w.ORIGIN_Z) * TILE };
+  }
+  // Convenience wrapper for runtime/gameplay code, which always operates on
+  // whichever level is currently active.
+  function tileToWorld(tx, ty) { return worldPos(world, tx, ty); }
 
-  for (var y = 0; y < H; y++) {
-    groundKinds.push(MAP[y].split(''));
-    for (var x = 0; x < W; x++) {
-      var c = MAP[y][x];
-      switch (c) {
-        case '#': obstacles.add(key(x, y)); features.trees.push({ x: x, y: y }); break;
-        case 'o': obstacles.add(key(x, y)); features.rocks.push({ x: x, y: y }); break;
-        case 'b': obstacles.add(key(x, y)); features.bushes.push({ x: x, y: y }); break;
-        case '~': obstacles.add(key(x, y)); break;
-        case 'H': obstacles.add(key(x, y)); features.houseTiles.push({ x: x, y: y }); break;
-        case 'S': obstacles.add(key(x, y)); features.signs.push({ x: x, y: y, message: SIGN_MESSAGES[features.signs.length] || 'A weathered sign, worn smooth by rain.' }); break;
-        case ',': features.flowers.push({ x: x, y: y }); break;
-        case '$': features.shards.push({ x: x, y: y, collected: false }); break;
-        case 'e': features.enemies.push({ x: x, y: y }); break;
-        case '@': playerStart = { x: x, y: y }; break;
+  // Parses a level's map into engine-agnostic data: which tiles block
+  // movement, where every prop/enemy/shard/sign/portal goes, and where the
+  // player starts. Doesn't touch Three.js at all.
+  function parseLevel(levelDef) {
+    var map = levelDef.map;
+    var w = map[0].length, h = map.length;
+    var exits = levelDef.exits || {};
+    var obstacles = new Set();
+    var features = { trees: [], rocks: [], bushes: [], flowers: [], shards: [], signs: [], enemies: [], houseTiles: [], portals: [] };
+    var groundKinds = [];
+    var playerStart = { x: 1, y: 1 };
+
+    for (var y = 0; y < h; y++) {
+      groundKinds.push(map[y].split(''));
+      for (var x = 0; x < w; x++) {
+        var c = map[y][x];
+        if (exits[c]) {
+          features.portals.push({ x: x, y: y, to: exits[c].to, spawn: { x: exits[c].x, y: exits[c].y } });
+          continue;
+        }
+        switch (c) {
+          case '#': obstacles.add(key(x, y)); features.trees.push({ x: x, y: y }); break;
+          case 'o': obstacles.add(key(x, y)); features.rocks.push({ x: x, y: y }); break;
+          case 'b': obstacles.add(key(x, y)); features.bushes.push({ x: x, y: y }); break;
+          case '~': obstacles.add(key(x, y)); break;
+          case 'H': obstacles.add(key(x, y)); features.houseTiles.push({ x: x, y: y }); break;
+          case 'S': obstacles.add(key(x, y)); features.signs.push({ x: x, y: y, message: (levelDef.signs || [])[features.signs.length] || 'A weathered sign, worn smooth by rain.' }); break;
+          case ',': features.flowers.push({ x: x, y: y }); break;
+          case '$': features.shards.push({ x: x, y: y, collected: false }); break;
+          case 'e': features.enemies.push({ x: x, y: y }); break;
+          case '@': playerStart = { x: x, y: y }; break;
+        }
       }
     }
+
+    return {
+      id: levelDef.id,
+      name: levelDef.name,
+      W: w, H: h,
+      ORIGIN_X: (w - 1) / 2, ORIGIN_Z: (h - 1) / 2,
+      exitChars: new Set(Object.keys(exits)),
+      obstacles: obstacles,
+      features: features,
+      groundKinds: groundKinds,
+      playerStart: playerStart,
+      totalShards: features.shards.length
+    };
   }
-  var TOTAL_SHARDS = features.shards.length;
 
   // ----------------------------------------------------------------------
-  // Three.js setup
+  // Three.js setup — level-independent (scene, camera, renderer, lights).
   // ----------------------------------------------------------------------
   var root = document.getElementById('game-root');
   var SKY_COLOR = 0xbfe3ea;
@@ -349,11 +422,6 @@
   sun.position.set(9, 16, 7);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
-  var shadowSpan = Math.max(W, H) * TILE * 0.6;
-  sun.shadow.camera.left = -shadowSpan;
-  sun.shadow.camera.right = shadowSpan;
-  sun.shadow.camera.top = shadowSpan;
-  sun.shadow.camera.bottom = -shadowSpan;
   sun.shadow.camera.near = 1;
   sun.shadow.camera.far = 50;
   sun.shadow.bias = -0.0015;
@@ -361,10 +429,9 @@
   scene.add(sun.target);
 
   // ----------------------------------------------------------------------
-  // Prop builders — small, chunky, low-poly "toy diorama" shapes
+  // Prop builders — small, chunky, low-poly "toy diorama" shapes. All
+  // level-independent factories; buildWorldGroup places instances of them.
   // ----------------------------------------------------------------------
-  function rand(a, b) { return a + Math.random() * (b - a); }
-
   function makeTile(kindColor, thickness) {
     var geo = new THREE.BoxGeometry(TILE * 0.97, thickness, TILE * 0.97);
     var mat = new THREE.MeshStandardMaterial({ color: kindColor, roughness: 0.9, metalness: 0.02 });
@@ -379,6 +446,7 @@
     // grass base, with per-tile jitter for a hand-painted look
     return new THREE.Color(0x5fae4c).offsetHSL(rand(-0.02, 0.02), rand(-0.05, 0.05), rand(-0.04, 0.03));
   }
+  var PORTAL_TILE_COLOR = 0x554a66;
 
   function createTree() {
     var g = new THREE.Group();
@@ -444,15 +512,16 @@
     return g;
   }
 
+  // Sized from tile-index deltas only (no world-origin lookup), so it can
+  // be built before the level that owns it has become the active world.
+  // buildWorldGroup positions the returned group afterward.
   function createHouse(tiles) {
     var minX = Math.min.apply(null, tiles.map(function (t) { return t.x; }));
     var maxX = Math.max.apply(null, tiles.map(function (t) { return t.x; }));
     var minY = Math.min.apply(null, tiles.map(function (t) { return t.y; }));
     var maxY = Math.max.apply(null, tiles.map(function (t) { return t.y; }));
-    var c1 = tileToWorld(minX, minY), c2 = tileToWorld(maxX, maxY);
-    var width = Math.abs(c2.x - c1.x) + TILE * 0.92;
-    var depth = Math.abs(c2.z - c1.z) + TILE * 0.92;
-    var centerX = (c1.x + c2.x) / 2, centerZ = (c1.z + c2.z) / 2;
+    var width = (maxX - minX) * TILE + TILE * 0.92;
+    var depth = (maxY - minY) * TILE + TILE * 0.92;
 
     var g = new THREE.Group();
     var wallH = 1.7;
@@ -489,7 +558,6 @@
     window1.rotation.y = Math.PI / 2;
     g.add(window1);
 
-    g.position.set(centerX, 0, centerZ);
     return g;
   }
 
@@ -517,6 +585,26 @@
     light.position.y = 0.55;
     g.add(light);
     g.userData.spin = mesh;
+    return g;
+  }
+
+  function createPortalMarker() {
+    var g = new THREE.Group();
+    var post = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.05, 0.06, 0.5, 6),
+      new THREE.MeshStandardMaterial({ color: 0x3a2a20, roughness: 0.85 })
+    );
+    post.position.y = 0.25;
+    post.castShadow = true;
+    g.add(post);
+    var orbMat = new THREE.MeshStandardMaterial({ color: 0xffcf6b, emissive: 0xffb238, emissiveIntensity: 1.1, roughness: 0.3 });
+    var orb = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 10), orbMat);
+    orb.position.y = 0.58;
+    g.add(orb);
+    var light = new THREE.PointLight(0xffb861, 1.0, 3, 2);
+    light.position.y = 0.58;
+    g.add(light);
+    g.userData.bob = orb;
     return g;
   }
 
@@ -619,66 +707,93 @@
   }
 
   // ----------------------------------------------------------------------
-  // Build the world
+  // World construction / teardown — turns parsed level data into a Three.js
+  // group. This is the only place that touches the scene graph per level.
   // ----------------------------------------------------------------------
-  var worldGroup = new THREE.Group();
-  scene.add(worldGroup);
-  var waterTiles = [];
+  function buildWorldGroup(w) {
+    var group = new THREE.Group();
+    var waterTiles = [];
 
-  for (var gy = 0; gy < H; gy++) {
-    for (var gx = 0; gx < W; gx++) {
-      var ch = groundKinds[gy][gx];
-      var thickness = ch === '~' ? 0.16 : 0.3;
-      var tileMesh = makeTile(groundColorFor(ch), thickness);
-      var pos = tileToWorld(gx, gy);
-      tileMesh.position.set(pos.x, thickness / -2 + (ch === '~' ? 0.02 : 0.15), pos.z);
-      worldGroup.add(tileMesh);
-      if (ch === '~') waterTiles.push({ mesh: tileMesh, phase: rand(0, Math.PI * 2), baseY: tileMesh.position.y });
+    for (var gy = 0; gy < w.H; gy++) {
+      for (var gx = 0; gx < w.W; gx++) {
+        var ch = w.groundKinds[gy][gx];
+        var isPortal = w.exitChars.has(ch);
+        var thickness = ch === '~' ? 0.16 : 0.3;
+        var color = isPortal ? PORTAL_TILE_COLOR : groundColorFor(ch);
+        var tileMesh = makeTile(color, thickness);
+        var pos = worldPos(w, gx, gy);
+        tileMesh.position.set(pos.x, thickness / -2 + (ch === '~' ? 0.02 : 0.15), pos.z);
+        group.add(tileMesh);
+        if (ch === '~') waterTiles.push({ mesh: tileMesh, phase: rand(0, Math.PI * 2), baseY: tileMesh.position.y });
+      }
     }
+
+    function place(list, builder) {
+      list.forEach(function (f) {
+        var p = worldPos(w, f.x, f.y);
+        var obj = builder();
+        obj.position.x += p.x;
+        obj.position.z += p.z;
+        group.add(obj);
+        f.obj = obj;
+      });
+    }
+
+    place(w.features.trees, createTree);
+    place(w.features.rocks, createRock);
+    place(w.features.bushes, createBush);
+    place(w.features.flowers, createFlower);
+    place(w.features.signs, createSignPost);
+    place(w.features.portals, createPortalMarker);
+
+    if (w.features.houseTiles.length) {
+      var hMinX = Math.min.apply(null, w.features.houseTiles.map(function (t) { return t.x; }));
+      var hMaxX = Math.max.apply(null, w.features.houseTiles.map(function (t) { return t.x; }));
+      var hMinY = Math.min.apply(null, w.features.houseTiles.map(function (t) { return t.y; }));
+      var hMaxY = Math.max.apply(null, w.features.houseTiles.map(function (t) { return t.y; }));
+      var hc1 = worldPos(w, hMinX, hMinY), hc2 = worldPos(w, hMaxX, hMaxY);
+      var house = createHouse(w.features.houseTiles);
+      house.position.set((hc1.x + hc2.x) / 2, 0, (hc1.z + hc2.z) / 2);
+      group.add(house);
+    }
+
+    place(w.features.shards, createShard);
+
+    var enemies = w.features.enemies.map(function (f) {
+      var p = worldPos(w, f.x, f.y);
+      var obj = createBlob();
+      obj.position.set(p.x, 0, p.z);
+      group.add(obj);
+      return {
+        obj: obj,
+        spawn: { x: p.x, z: p.z },
+        target: { x: p.x, z: p.z },
+        alive: true,
+        retarget: 0,
+        respawnTimer: 0,
+        bobPhase: rand(0, Math.PI * 2)
+      };
+    });
+
+    return { group: group, waterTiles: waterTiles, enemies: enemies };
   }
 
-  function place(list, builder, parent) {
-    list.forEach(function (f) {
-      var p = tileToWorld(f.x, f.y);
-      var obj = builder();
-      obj.position.x += p.x;
-      obj.position.z += p.z;
-      (parent || worldGroup).add(obj);
-      f.obj = obj;
+  function disposeGroup(group) {
+    group.traverse(function (obj) {
+      if (obj.isMesh) {
+        if (obj.geometry && obj.geometry !== DEBRIS_GEO) obj.geometry.dispose();
+        if (obj.material) {
+          if (Array.isArray(obj.material)) obj.material.forEach(function (m) { m.dispose(); });
+          else obj.material.dispose();
+        }
+      }
     });
   }
-
-  place(features.trees, createTree);
-  place(features.rocks, createRock);
-  place(features.bushes, createBush);
-  place(features.flowers, createFlower);
-  place(features.signs, createSignPost);
-
-  if (features.houseTiles.length) {
-    worldGroup.add(createHouse(features.houseTiles));
-  }
-
-  place(features.shards, createShard);
-
-  var enemies = features.enemies.map(function (f) {
-    var p = tileToWorld(f.x, f.y);
-    var obj = createBlob();
-    obj.position.set(p.x, 0, p.z);
-    worldGroup.add(obj);
-    return {
-      obj: obj,
-      spawn: { x: p.x, z: p.z },
-      target: { x: p.x, z: p.z },
-      alive: true,
-      retarget: 0,
-      respawnTimer: 0,
-      bobPhase: rand(0, Math.PI * 2)
-    };
-  });
 
   // ----------------------------------------------------------------------
   // Defeat explosions — chunky debris + an expanding flash ring, purely
   // additive visual state updated each frame and discarded once expired.
+  // Parented to whichever level group is currently active.
   // ----------------------------------------------------------------------
   var effects = [];
   var DEBRIS_GEO = new THREE.IcosahedronGeometry(0.09, 0);
@@ -688,7 +803,7 @@
     var group = new THREE.Group();
     group.position.copy(pos);
     group.position.y += 0.34;
-    worldGroup.add(group);
+    world.group.add(group);
 
     var debrisMat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.5, transparent: true, opacity: 1 });
     var pieces = [];
@@ -717,7 +832,7 @@
       fx.age += dt;
       var t = fx.age / fx.life;
       if (t >= 1) {
-        worldGroup.remove(fx.group);
+        world.group.remove(fx.group);
         effects.splice(i, 1);
         continue;
       }
@@ -752,8 +867,8 @@
 
   var player = {
     obj: createPlayer(),
-    tileX: playerStart.x,
-    tileY: playerStart.y,
+    tileX: 0,
+    tileY: 0,
     facing: 'down',
     isMoving: false,
     moveElapsed: 0,
@@ -765,11 +880,6 @@
     attackCooldown: 0,
     attackAnim: 0
   };
-  (function () {
-    var p0 = tileToWorld(player.tileX, player.tileY);
-    player.obj.position.set(p0.x, 0, p0.z);
-  })();
-  worldGroup.add(player.obj);
 
   var MOVE_DURATION = 0.17;
   var ATTACK_DURATION = 0.26;
@@ -777,22 +887,74 @@
   var ATTACK_HIT_RADIUS = 1.05;
   var SWORD_SWING_FROM = -1.5;
   var SWORD_SWING_TO = 0.9;
-  var MAX_SHARDS = TOTAL_SHARDS;
-  var shardsCollected = 0;
 
   // ----------------------------------------------------------------------
   // Camera
   // ----------------------------------------------------------------------
   var camOffset = new THREE.Vector3(0, 10.5, 6.2);
   var camLookAhead = new THREE.Vector3(0, 0.6, -1.1);
-  camera.position.copy(player.obj.position).add(camOffset);
-  camera.lookAt(player.obj.position.clone().add(camLookAhead));
 
   window.addEventListener('resize', function () {
     camera.aspect = root.clientWidth / root.clientHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(root.clientWidth, root.clientHeight);
   });
+
+  // ----------------------------------------------------------------------
+  // Level loading — the level-switching engine. loadLevel() is the whole
+  // API: tear down the current level's group (if any), build the new one,
+  // drop the player at the right spawn tile, and snap the camera/shadow
+  // frustum to fit.
+  // ----------------------------------------------------------------------
+  var world = null;
+  var LEVEL_INDEX = {};
+  LEVELS.forEach(function (lvl, i) { LEVEL_INDEX[lvl.id] = i; });
+
+  function loadLevel(index, spawnOverride) {
+    var levelDef = LEVELS[index];
+    var newWorld = parseLevel(levelDef);
+    var built = buildWorldGroup(newWorld);
+    newWorld.group = built.group;
+    newWorld.waterTiles = built.waterTiles;
+    newWorld.enemies = built.enemies;
+    newWorld.shardsCollected = 0;
+    newWorld.maxShards = newWorld.totalShards;
+
+    if (world) {
+      scene.remove(world.group);
+      disposeGroup(world.group);
+    }
+    effects.length = 0;
+
+    world = newWorld;
+    scene.add(world.group);
+    world.group.add(player.obj);
+
+    var spawnTile = spawnOverride || world.playerStart;
+    player.tileX = spawnTile.x;
+    player.tileY = spawnTile.y;
+    player.isMoving = false;
+    var p = tileToWorld(player.tileX, player.tileY);
+    player.obj.position.set(p.x, 0, p.z);
+
+    var shadowSpan = Math.max(world.W, world.H) * TILE * 0.6;
+    sun.shadow.camera.left = -shadowSpan;
+    sun.shadow.camera.right = shadowSpan;
+    sun.shadow.camera.top = shadowSpan;
+    sun.shadow.camera.bottom = -shadowSpan;
+    sun.shadow.camera.updateProjectionMatrix();
+
+    renderShardCount();
+    dialogueOpen = false;
+    closeDialogue();
+
+    // Snap instantly rather than lerping — panning across the old map on
+    // the way to the new one would look broken.
+    camera.position.copy(player.obj.position).add(camOffset);
+    camera.lookAt(player.obj.position.clone().add(camLookAhead));
+
+    showToast(levelDef.name, 2000);
+  }
 
   // ----------------------------------------------------------------------
   // Audio — tiny synthesized SFX, no external files
@@ -843,6 +1005,7 @@
   function sfxWin() { [523, 659, 784, 1046].forEach(function (f, i) { tone(f, i * 0.12, 0.28, 'triangle'); }); }
   function sfxBump() { tone(140, 0, 0.06, 'square', 0.08); }
   function sfxSwing() { sweep(900, 260, 0, 0.14, 'sawtooth', 0.1); }
+  function sfxPortal() { tone(440, 0, 0.14, 'sine', 0.14); tone(660, 0.08, 0.2, 'sine', 0.14); tone(880, 0.16, 0.26, 'sine', 0.12); }
 
   // ----------------------------------------------------------------------
   // HUD
@@ -861,8 +1024,7 @@
   renderHearts();
 
   var shardCountText = document.getElementById('shard-count-text');
-  function renderShardCount() { shardCountText.textContent = shardsCollected + ' / ' + MAX_SHARDS; }
-  renderShardCount();
+  function renderShardCount() { shardCountText.textContent = world.shardsCollected + ' / ' + world.maxShards; }
 
   var dialogueEl = document.getElementById('dialogue');
   var dialogueTextEl = document.getElementById('dialogue-text');
@@ -925,8 +1087,9 @@
   document.getElementById('action-btn').addEventListener('pointerdown', function (e) { e.preventDefault(); handleAction(); });
 
   function findNearbySign() {
-    for (var i = 0; i < features.signs.length; i++) {
-      var s = features.signs[i];
+    var signs = world.features.signs;
+    for (var i = 0; i < signs.length; i++) {
+      var s = signs[i];
       var dx = Math.abs(s.x - player.tileX), dy = Math.abs(s.y - player.tileY);
       if (dx + dy <= 1) return s;
     }
@@ -955,7 +1118,7 @@
     var vec = DIR_VEC[dir];
     var target = tileToWorld(player.tileX + vec.dx, player.tileY + vec.dz);
     var here = tileToWorld(player.tileX, player.tileY);
-    enemies.forEach(function (en) {
+    world.enemies.forEach(function (en) {
       if (!en.alive) return;
       var dx1 = en.obj.position.x - target.x, dz1 = en.obj.position.z - target.z;
       var dx2 = en.obj.position.x - here.x, dz2 = en.obj.position.z - here.z;
@@ -986,14 +1149,14 @@
   // ----------------------------------------------------------------------
   // Update loop
   // ----------------------------------------------------------------------
-  function inBounds(tx, ty) { return tx >= 0 && ty >= 0 && tx < W && ty < H; }
+  function inBounds(tx, ty) { return tx >= 0 && ty >= 0 && tx < world.W && ty < world.H; }
 
   function attemptMove(dir) {
     setFacing(dir);
     if (player.isMoving) return;
     var vec = DIR_VEC[dir];
     var ntx = player.tileX + vec.dx, nty = player.tileY + vec.dz;
-    if (!inBounds(ntx, nty) || obstacles.has(key(ntx, nty))) { sfxBump(); return; }
+    if (!inBounds(ntx, nty) || world.obstacles.has(key(ntx, nty))) { sfxBump(); return; }
     player.from = tileToWorld(player.tileX, player.tileY);
     player.to = tileToWorld(ntx, nty);
     player.tileX = ntx;
@@ -1003,32 +1166,47 @@
   }
 
   function checkShardPickup() {
-    features.shards.forEach(function (s) {
+    world.features.shards.forEach(function (s) {
       if (s.collected) return;
       if (s.x === player.tileX && s.y === player.tileY) {
         s.collected = true;
         s.obj.visible = false;
-        shardsCollected++;
+        world.shardsCollected++;
         renderShardCount();
         sfxPickup();
-        if (shardsCollected === MAX_SHARDS) {
+        if (world.shardsCollected === world.maxShards) {
           setTimeout(function () { showToast('✦ Every Light Shard is found — the grove is at peace ✦', 3600); sfxWin(); }, 150);
         } else {
-          showToast('Light Shard found! (' + shardsCollected + ' / ' + MAX_SHARDS + ')', 1600);
+          showToast('Light Shard found! (' + world.shardsCollected + ' / ' + world.maxShards + ')', 1600);
         }
       }
     });
   }
 
+  function checkPortal() {
+    var portals = world.features.portals;
+    for (var i = 0; i < portals.length; i++) {
+      var p = portals[i];
+      if (p.x === player.tileX && p.y === player.tileY) {
+        var destIndex = LEVEL_INDEX[p.to];
+        if (destIndex !== undefined) {
+          sfxPortal();
+          loadLevel(destIndex, p.spawn);
+        }
+        return;
+      }
+    }
+  }
+
   function respawnPlayer() {
-    player.tileX = playerStart.x;
-    player.tileY = playerStart.y;
+    player.tileX = world.playerStart.x;
+    player.tileY = world.playerStart.y;
     var p = tileToWorld(player.tileX, player.tileY);
     player.obj.position.set(p.x, 0, p.z);
     player.isMoving = false;
     player.hearts = player.maxHearts;
     renderHearts();
-    showToast('A warm light carries you back to the clearing...', 2200);
+    showToast('A warm light carries you back...', 2200);
   }
 
   var clock = new THREE.Clock();
@@ -1053,6 +1231,7 @@
           player.obj.userData.legL.rotation.x = 0;
           player.obj.userData.legR.rotation.x = 0;
           checkShardPickup();
+          checkPortal();
         }
       } else if (!dialogueOpen) {
         var dir = pressedDirs[pressedDirs.length - 1];
@@ -1083,7 +1262,7 @@
       }
 
       // enemies: wander near spawn, squash-stretch bob, check contact damage
-      enemies.forEach(function (en) {
+      world.enemies.forEach(function (en) {
         if (!en.alive) {
           en.respawnTimer -= dt;
           if (en.respawnTimer <= 0) {
@@ -1130,25 +1309,30 @@
 
       updateEffects(dt);
 
-      waterTiles.forEach(function (wt) {
+      world.waterTiles.forEach(function (wt) {
         wt.mesh.position.y = wt.baseY + Math.sin(t * 1.6 + wt.phase) * 0.03;
       });
-      features.shards.forEach(function (s) {
+      world.features.shards.forEach(function (s) {
         if (s.collected || !s.obj) return;
         s.obj.userData.spin.rotation.y = t * 1.6;
         s.obj.userData.spin.position.y = 0.55 + Math.sin(t * 2.2) * 0.08;
+      });
+      world.features.portals.forEach(function (p) {
+        if (!p.obj) return;
+        p.obj.userData.bob.position.y = 0.58 + Math.sin(t * 3 + p.x) * 0.06;
       });
 
       var desiredCamPos = player.obj.position.clone().add(camOffset);
       camera.position.lerp(desiredCamPos, 1 - Math.pow(0.0008, dt));
       var lookTarget = player.obj.position.clone().add(camLookAhead);
-      var currentLook = camera.position.clone().add(new THREE.Vector3(0, -1, -1));
       camera.lookAt(player.obj.position.clone().add(new THREE.Vector3(0, 0.6, 0)).lerp(lookTarget, 1));
     }
 
     renderer.render(scene, camera);
     requestAnimationFrame(update);
   }
+
+  loadLevel(0);
   requestAnimationFrame(update);
 })();
 </script>
