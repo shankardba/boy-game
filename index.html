@@ -954,10 +954,14 @@
 
     var vec = DIR_VEC[dir];
     var target = tileToWorld(player.tileX + vec.dx, player.tileY + vec.dz);
+    var here = tileToWorld(player.tileX, player.tileY);
     enemies.forEach(function (en) {
       if (!en.alive) return;
-      var dx = en.obj.position.x - target.x, dz = en.obj.position.z - target.z;
-      if (Math.sqrt(dx * dx + dz * dz) < ATTACK_HIT_RADIUS) defeatEnemy(en);
+      var dx1 = en.obj.position.x - target.x, dz1 = en.obj.position.z - target.z;
+      var dx2 = en.obj.position.x - here.x, dz2 = en.obj.position.z - here.z;
+      var hitsTargetTile = Math.sqrt(dx1 * dx1 + dz1 * dz1) < ATTACK_HIT_RADIUS;
+      var hitsOwnTile = Math.sqrt(dx2 * dx2 + dz2 * dz2) < ATTACK_HIT_RADIUS;
+      if (hitsTargetTile || hitsOwnTile) defeatEnemy(en);
     });
   }
 
